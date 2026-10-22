@@ -1,0 +1,13 @@
+# Team 3.2 — Baseline Protocol (Offline Fallback)
+
+**Why this setup:** Our project is at an early prototype stage and eEVA is unavailable. Instead of automatic webcam AU detection, we will provisionally use human-observed facial movements and typed speech transcripts with `node trigger.js --binary`. This tests the **check-in decision rule**, not the accuracy of facial recognition or speech recognition. The instructor's fallback calls for recordings; **confirm permission before substituting unrecorded live observations**.
+
+1. **Setup:** Laptop with frozen `trigger.js` Git commit, Node.js, Team 3.2 trial log, scenario script, quiet/well-lit space. Keep code and keyword list unchanged during counted trials.
+2. **Start:** Assign ID P01, P02, etc. Ask consent before participating and separately before any face/voice recording. Do not record without permission.
+3. **Instructions (read aloud):** “Please say the assigned line while making the requested expression. We are evaluating a prototype, not you. You may stop at any time.” Do not tell participants the expected trigger outcome.
+4. **Steps:** Do 1–2 **dry runs** first. For each counted trial, select a pre-labeled scenario (facial + verbal cue; facial only; verbal only; neither). Have the participant perform it. Observe brow lowering (AU4-like) and lid tightening (AU7-like); enter yes/no for each and type the actual spoken line into `node trigger.js --binary`. Obtain at least **5 trials per condition** (20 if using these four conditions).
+5. **Record & score:** Before running the program, log the scenario's independently assigned `Should fire?` label. Afterward log `Fired?` and the outcome: **TP** yes/yes, **FP** no/yes, **FN** yes/no, **TN** no/no. Use the Team 3.2 trial-log tab (trial ID, date, version/commit, participant code, condition, labels, notes). Record uncertain observations; do not invent numeric AU intensities. Summarize counts, precision, recall, F1, and false-trigger rate. No questionnaires are required for the *minimum trigger baseline*; later empathy questionnaires belong to the wording study.
+6. **End:** Save the trial log, thank and briefly debrief the participant. Retain only approved, necessary recordings/data.
+7. **If it fails:** Log the failure, do not delete it; repeat only if justified and label the repeat. If code changes, record a new version and restart counted baseline trials.
+
+**Limitations:** Manual AU-*like* observations are subjective and not validated AU measurements. Scripted input bypasses speech recognition. Confirm with the instructor that the unrecorded live-observation alternative satisfies the permitted fallback; otherwise record consenting participants and score recordings offline.
