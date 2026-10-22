@@ -53,7 +53,10 @@ const CONFIG = {
     "can't keep up",
     "cannot keep up",
     "too much to handle",
-    "need help"
+    "need help",
+    "sad",
+    "depressed",
+    "anxious"
   ],
 
   // Used later in the check-in wording experiment
