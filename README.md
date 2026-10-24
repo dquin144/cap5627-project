@@ -51,16 +51,13 @@ Flow: start camera (`helpers.webcam.start`) and recognizer (`AudioToText`) → c
 
 - `metrics` logs the decision, cue flags, matched phrases, peak AU4/AU7 and the threshold. The raw sentence is not logged.
 - **Check In** is a manual override that bypasses the gate. It is logged as `trigger_source=manual`. Do not use it during counted trials.
-- On every start `main.js` checks the platform functions it calls (webcam, analyzer, `wait`, `AudioToText`, `createCheckInStrategy`, `agent.speak`, metrics, overlay), prints the helper and context names, and lists any missing ones in the console and on the preview line. A missing metrics logger falls back to the console and a missing overlay to adding the panel to the page.
-- Status: runs on sage.cs.fiu.edu. The camera preview, panel, buttons and speech capture work. A full triggered check-in (spoken strategy sentence, then Pause / Continue) and the logged AU values have not yet been confirmed.
+- Status: verified only against a mock runtime, not yet confirmed working on sage.cs.fiu.edu.
 
 ### Open items before counted eEVA trials
 
-1. **Strategy names.** At startup the console reports which of the `strategies` names `createCheckInStrategy` accepts. If any are rejected, rename them in `config.json` to the identifiers the platform uses.
-2. **AU scale.** The scale of the analyzer's AU values is not documented. Compare the logged peak AU values against the threshold of 45 (it may be 0–1) before trusting decisions.
-3. **Peak vs. binary.** Peak-over-listening-window biases toward firing and differs from binary-mode observation. Do not merge eEVA and offline datasets.
-4. **Analyzer.** Pyfeat (eEVA) vs. OpenFace 3.0 (planned); see Research rationale.
-
-## Why `tentative_uncertainty` is kept
-
-It is not one of the four VR-CoDES-P strategies; it is the label from an earlier design iteration (a tentative, uncertain check-in). `CONFIG.checkInStrategy` in `trigger.js` and `trigger-core.js` still uses it. It only labels the demo output and does not affect any decision, and those files are frozen for the counted baseline, so it was left unchanged. It is listed in `config.json` so the name there matches the frozen files. Whether `createCheckInStrategy` accepts it is confirmed by the startup console report. Do not use it as an experimental condition unless the proposal says so.
+1. **Platform helpers.** On every start `main.js` checks the platform functions it calls (webcam, analyzer, `wait`, `AudioToText`, `createCheckInStrategy`, `agent.speak`, metrics, overlay), prints the helper and context names, and lists any missing ones in the console and on the preview line. A missing metrics logger falls back to the console and a missing overlay to adding the panel to the page. Missing camera, analyzer or `createCheckInStrategy` still stops the affected step, with a message naming it.
+2. **Strategy names.** At startup the console reports which of the four `strategies` names `createCheckInStrategy` accepts. If any are rejected, rename them in `config.json` to the identifiers the platform uses. Confirm this on the first run.
+3. **AU scale.** The scale of the analyzer's AU values is not documented. Compare the logged peak AU values against the threshold of 45 (it may be 0–1) before trusting decisions.
+4. **Peak vs. binary.** Peak-over-listening-window biases toward firing and differs from binary-mode observation. Do not merge eEVA and offline datasets.
+5. **Analyzer.** Pyfeat (eEVA) vs. OpenFace 3.0 (planned); see Research rationale.
+6. **Why `tentative_uncertainty` is kept.** It is not one of the four VR-CoDES-P strategies; it is the label from an earlier design iteration (a tentative, uncertain check-in). `CONFIG.checkInStrategy` in `trigger.js` and `trigger-core.js` still uses it. It only labels the demo output and does not affect any decision, and those files are frozen for the counted baseline, so it was left unchanged. It is listed in `config.json` so the name there matches the frozen files. Whether `createCheckInStrategy` accepts it is confirmed by the startup console report. Do not use it as an experimental condition unless the proposal says so.
