@@ -1,5 +1,12 @@
 {
-  "strategy": "tentative_uncertainty",
+  "strategies": [
+    "explicit_provides_space",
+    "explicit_reduces_space",
+    "nonexplicit_provides_space",
+    "nonexplicit_reduces_space",
+    "tentative_uncertainty"
+  ],
+  "strategy": "nonexplicit_provides_space",
   "triggerSource": "facial+verbal",
   "sampleConfidence": 0.8,
   "biofeedbackEngine": "pyfeat"

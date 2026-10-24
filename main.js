@@ -5,13 +5,16 @@
  * line, and the module records the strongest AU4 / AU7 facial reading seen while they spoke.
  * The facial reading and the spoken words are passed to evaluateCheckIn(); only when BOTH show
  * a cue does the agent speak a check-in. Participant answers (Pause / Continue) are logged.
+ * On start it also checks that the platform functions it needs exist and that the chosen
+ * strategy is accepted, and reports any problem on screen and in the console.
  *
  * The project checker loads this file as CommonJS, so it must expose run(context) and
  * stop(context) through module.exports. The research rationale and the setting descriptions
  * for config.json are in the README.
  */
 
-// Strategy name and related settings for the check-in wording and the facial analyzer.
+// Settings: the allowed check-in strategies (config.strategies), the one used this run
+// (config.strategy), values passed to the strategy, and the facial analyzer name.
 const config = require("./config.json");
 
 // CONFIG holds the AU threshold, the AU ids to watch and the distress phrase list.
@@ -39,8 +42,7 @@ let finishListening = null;
 // True once Stop has been pressed. Checked after every await so work ends quietly.
 let stopped = false;
 
-// Number of recognizer callbacks received in the current listen. Zero means the recognizer
-// produced nothing, which separates "microphone problem" from "heard but unusable".
+// Number of recognizer callbacks received during the current listen.
 let speechEvents = 0;
 
 // Optional callback that receives each partial transcript so it can be shown on screen.
@@ -83,20 +85,56 @@ function listenOnce(silenceMs = 1200, maxWaitMs = 8000) {
   });
 }
 
+// Panel added to the page directly when the platform has no overlay helper, so stop() can remove it.
+let fallbackPanel = null;
+
+// ---------------------------------------------------------------
+// findMissingPlatformPieces: names the platform functions this module calls that the current
+// project does not provide. Returns an empty list when everything is available.
+// ---------------------------------------------------------------
+function findMissingPlatformPieces(context) {
+  const h = context.helpers || {};
+  const needed = [
+    ["helpers.webcam.start", h.webcam?.start],
+    ["helpers.biofeedback.analyzeVideo", h.biofeedback?.analyzeVideo],
+    ["helpers.biofeedback.getTopAUs", h.biofeedback?.getTopAUs],
+    ["helpers.wait", h.wait],
+    ["helpers.project.createCheckInStrategy", h.project?.createCheckInStrategy],
+    ["AudioToText", typeof AudioToText === "undefined" ? undefined : AudioToText],
+    ["context.agent.speak", context.agent?.speak],
+    ["context.metrics.create", context.metrics?.create],
+    ["context.ui.mountOverlay", context.ui?.mountOverlay]
+  ];
+  return needed
+    .filter(([, piece]) => typeof piece !== "function")
+    .map(([name]) => name);
+}
+
 // ---------------------------------------------------------------
 // run: called by the platform when the project starts.
 // ---------------------------------------------------------------
 module.exports.run = async function run(context) {
   stopped = false;
 
-  // Startup diagnostics: lists what this project actually exposes, to debug missing helpers.
+  // Startup diagnostics: lists what this project actually exposes.
   console.log("project helpers:", Object.keys(context.helpers?.project || {}));
-  console.log("helpers:", Object.keys(context.helpers));
+  console.log("helpers:", Object.keys(context.helpers || {}));
   console.log("context:", Object.keys(context));
   console.log("speech helper:", context.speech ? Object.keys(context.speech) : "none");
 
-  // Platform metrics logger. Every trial decision and participant response is recorded here.
-  const metrics = context.metrics.create("distress-check-in");
+  // Platform functions this module needs but the project does not provide.
+  const missingPieces = findMissingPlatformPieces(context);
+  if (missingPieces.length) {
+    console.warn("Missing platform pieces:", missingPieces.join(", "));
+  } else {
+    console.log("All required platform pieces are available.");
+  }
+
+  // Metrics logger. Every trial decision and participant response is recorded here. If the
+  // platform has no metrics helper, records go to the console instead so trials still run.
+  const metrics = context.metrics?.create
+    ? context.metrics.create("distress-check-in")
+    : { record: (...args) => console.log("[metric]", ...args) };
 
   // ---------------------------------------------------------------
   // On-screen panel: status text, camera preview and the trial buttons.
@@ -161,17 +199,79 @@ module.exports.run = async function run(context) {
   let busy = false;
 
   panel.append(prompt, statusLine, camHost, listenButton, checkInButton, pause, continueButton);
-  context.ui.mountOverlay(panel);
+  if (typeof context.ui?.mountOverlay === "function") {
+    context.ui.mountOverlay(panel);
+  } else {
+    // No overlay helper: put the panel on the page directly.
+    fallbackPanel = panel;
+    (context.containerRef?.current || document.body).appendChild(panel);
+  }
+
+  // ---------------------------------------------------------------
+  // createStrategy: build the check-in strategy named by config.strategy.
+  // Throws a message naming the exact problem if config.strategy is not listed in
+  // config.strategies, the helper is missing, the platform rejects the name, or the result
+  // lacks the methods this module calls.
+  // ---------------------------------------------------------------
+  function createStrategy() {
+    if (!Array.isArray(config.strategies) || !config.strategies.includes(config.strategy)) {
+      throw new Error(
+        'config.strategy "' + config.strategy + '" is not one of the allowed strategies: ' +
+        (Array.isArray(config.strategies) ? config.strategies.join(", ") : "(none listed)")
+      );
+    }
+    const create = context.helpers?.project?.createCheckInStrategy;
+    if (typeof create !== "function") {
+      throw new Error("createCheckInStrategy is not available in this project.");
+    }
+    let created;
+    try {
+      created = create(config.strategy);
+    } catch (err) {
+      throw new Error(
+        'Strategy "' + config.strategy + '" was rejected by createCheckInStrategy: ' +
+        (err && err.message ? err.message : err)
+      );
+    }
+    if (!created ||
+        typeof created.getUtterance !== "function" ||
+        typeof created.handleUserResponse !== "function") {
+      throw new Error(
+        'Strategy "' + config.strategy + '" did not return getUtterance and handleUserResponse.'
+      );
+    }
+    return created;
+  }
+
+  // Report setup problems on the preview line before the first trial instead of mid-trial.
+  if (missingPieces.length) {
+    prompt.textContent = "Missing platform pieces: " + missingPieces.join(", ") + " (see console)";
+  } else {
+    try {
+      createStrategy();
+    } catch (err) {
+      console.warn(err.message);
+      prompt.textContent = err.message;
+    }
+    // Console report of which listed strategy names the platform accepts, so a naming
+    // mismatch between config.json and createCheckInStrategy shows up on the first run.
+    for (const name of config.strategies || []) {
+      try {
+        context.helpers.project.createCheckInStrategy(name);
+        console.log('Strategy "' + name + '": accepted by createCheckInStrategy');
+      } catch (err) {
+        console.warn('Strategy "' + name + '": rejected -', err && err.message ? err.message : err);
+      }
+    }
+  }
 
   // ---------------------------------------------------------------
   // runCheckIn: build the check-in sentence, show it, log it and speak it.
   // triggerSource says why it ran ("facial+verbal" or "manual") and is only used for logging.
   // ---------------------------------------------------------------
   async function runCheckIn(triggerSource) {
-    // Create the strategy chosen in config.json.
-    strategy = context.helpers.project.createCheckInStrategy(
-      config.strategy
-    );
+    // Create the strategy named by config.strategy (validated against config.strategies).
+    strategy = createStrategy();
 
     // Ask the strategy for the sentence to say. It receives config.triggerSource rather than
     // the real source, because it is unknown whether getUtterance validates that value.
@@ -189,6 +289,9 @@ module.exports.run = async function run(context) {
       "trigger_source=" + triggerSource
     );
 
+    if (typeof context.agent?.speak !== "function") {
+      throw new Error("context.agent.speak is not available in this project.");
+    }
     await context.agent.speak(utterance);
     if (stopped) return;
 
@@ -299,13 +402,11 @@ module.exports.run = async function run(context) {
   }
 
   // Captures the participant's spoken line and returns it as text ("" if nothing usable).
-  // Runs inside the Start-trial click, so any browser microphone permission prompt is allowed.
   async function captureLine() {
     speechEvents = 0;
     onInterim = (text) => { if (!stopped) setStatus("Hearing: \"" + text + "\""); };
 
-    // Step 1: confirm the browser lets us use the microphone. A blocked or missing mic
-    // makes recognition fail silently, so surface that problem clearly instead.
+    // Step 1: confirm the browser allows microphone access before listening.
     try {
       const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
       probe.getTracks().forEach((t) => t.stop());
@@ -322,9 +423,8 @@ module.exports.run = async function run(context) {
     const heard = await listenOnce();
     if (heard || stopped) return heard;
 
-    // Step 3: the recognizer produced no events at all, so try the platform's own speech
-    // helper if this project has one. Its exact signature is unconfirmed, so this is a
-    // best-effort fallback.
+    // Step 3: if the recognizer returned no events, try the platform's speech helper
+    // when this project provides one.
     if (speechEvents === 0 && typeof context.speech?.listenOnce === "function") {
       console.warn("AudioToText produced no events; trying context.speech.listenOnce");
       setStatus("Retrying with the platform speech helper... say the line now.");
@@ -405,7 +505,7 @@ module.exports.run = async function run(context) {
   // Setup: start the camera and the recognizer, then begin reading the face.
   // ---------------------------------------------------------------
   try {
-    if (!helpers.webcam || !helpers.biofeedback) {
+    if (!helpers?.webcam || !helpers?.biofeedback) {
       throw new Error("helpers.webcam / helpers.biofeedback not exposed on context.helpers (see console)");
     }
     camera = await helpers.webcam.start(
@@ -464,7 +564,9 @@ module.exports.stop = async function stop(context) {
   window.clearTimeout(listenLimitTimer);
   recognizer?.stopRecognition();
   camera?.stop();
-  context.agent.stopSpeaking();
-  context.agent.neutral();
-  context.ui.clear();
+  context.agent?.stopSpeaking?.();
+  context.agent?.neutral?.();
+  context.ui?.clear?.();
+  fallbackPanel?.remove();
+  fallbackPanel = null;
 };
