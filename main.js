@@ -14,8 +14,12 @@ let silenceTimer = null;
 let listenLimitTimer = null;
 let finishListening = null;
 let stopped = false;
+// Diagnostics only (not in the guide's helper): count recognizer callbacks and surface
+// partial transcripts, so "mic permission denied" and "recognizer silent" can be told apart.
+let speechEvents = 0;
+let onInterim = null;
 
-// ---- Listen-once helper, copied unchanged from the guide (Sec. 6.1) ----
+// ---- Listen-once helper, from the guide (Sec. 6.1); only the two diagnostic lines are added ----
 function listenOnce(silenceMs = 1200, maxWaitMs = 8000) {
   return new Promise((resolve) => {
     let latest = "";
@@ -32,7 +36,9 @@ function listenOnce(silenceMs = 1200, maxWaitMs = 8000) {
     };
 
     recognizer.startContinuousRecognition((transcript) => {
+      speechEvents++;                 // diagnostic
       latest = transcript || "";
+      onInterim?.(latest);            // diagnostic
       window.clearTimeout(silenceTimer);
       silenceTimer = window.setTimeout(finishListening, silenceMs);
     });
@@ -49,6 +55,7 @@ module.exports.run = async function run(context) {
   console.log("project helpers:", Object.keys(context.helpers?.project || {}));
   console.log("helpers:", Object.keys(context.helpers));
   console.log("context:", Object.keys(context));
+  console.log("speech helper:", context.speech ? Object.keys(context.speech) : "none");
 
   const metrics = context.metrics.create("distress-check-in");
 
@@ -204,6 +211,54 @@ module.exports.run = async function run(context) {
   }
 
   // ---------------------------------------------------------------
+  // Capture the spoken line. Called from the Start-trial click, so browser user
+  // activation is still in effect for any microphone permission prompt.
+  // ---------------------------------------------------------------
+  function transcriptFrom(raw) {
+    if (typeof raw === "string") return raw.trim();
+    if (raw && typeof raw === "object") {
+      const t = raw.transcript ?? raw.text ?? "";
+      return typeof t === "string" ? t.trim() : "";
+    }
+    return "";
+  }
+
+  async function captureLine() {
+    speechEvents = 0;
+    onInterim = (text) => { if (!stopped) setStatus("Hearing: \"" + text + "\""); };
+
+    // 1. Browser-level check: a denied or missing mic makes recognition fail silently.
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+      probe.getTracks().forEach((t) => t.stop());
+    } catch (err) {
+      console.error("Microphone check failed:", err);
+      throw new Error(
+        "Microphone unavailable (" + (err && err.name ? err.name : err) +
+        "). Allow the mic for this site in the browser address bar, then retry."
+      );
+    }
+    if (stopped) return "";
+
+    // 2. Guide recognizer (AudioToText + listenOnce).
+    const heard = await listenOnce();
+    if (heard || stopped) return heard;
+
+    // 3. Nothing from the recognizer at all: fall back to the platform's speech helper,
+    // if this project exposes one (signature is unconfirmed, so this is best effort).
+    if (speechEvents === 0 && typeof context.speech?.listenOnce === "function") {
+      console.warn("AudioToText produced no events; trying context.speech.listenOnce");
+      setStatus("Retrying with the platform speech helper... say the line now.");
+      try {
+        return transcriptFrom(await context.speech.listenOnce({ timeoutMs: 8000 }));
+      } catch (err) {
+        console.error("context.speech.listenOnce failed:", err);
+      }
+    }
+    return "";
+  }
+
+  // ---------------------------------------------------------------
   // One trial = listen for the spoken line while tracking peak AU4/AU7
   // ---------------------------------------------------------------
   listenButton.addEventListener("click", async () => {
@@ -214,12 +269,16 @@ module.exports.run = async function run(context) {
       resetPeak();
       listening = true;
       setStatus("Listening... say the line now.");
-      const transcript = await listenOnce();
+      const transcript = await captureLine();
       listening = false;
       if (stopped) return;
 
       if (!transcript) {
-        setStatus("No speech detected. Click Start trial to retry.");
+        setStatus(
+          speechEvents === 0
+            ? "No speech events received from the recognizer. Check the mic (see console) and retry."
+            : "Speech was heard but no usable transcript. Click Start trial to retry."
+        );
         metrics.record("trigger_decision", "no_speech", "peak_au4=" + peak["4"] + ";peak_au7=" + peak["7"]);
         return;
       }
