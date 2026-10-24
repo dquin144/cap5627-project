@@ -1,0 +1,17 @@
+{
+  "name": "4.2 – Context-Aware AU-Triggered Empathic Check-In",
+  "entry": "src/main.js",
+  "runtime": "browser-js",
+  "idea": "facial-distress-checkin",
+  "guidelineRevision": "2026-08-06",
+  "helperGroups": [
+    "helpers.biofeedback.analyzeVideo",
+    "helpers.biofeedback.getTopAUs",
+    "helpers.webcam.start",
+    "helpers.wait",
+    "AudioToText",
+    "project.createCheckInStrategy",
+    "VoiceManager",
+    "project.createMetricLogger"
+  ]
+}

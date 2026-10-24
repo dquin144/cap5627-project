@@ -1,0 +1,35 @@
+
+{
+  "teamProjectNumber": "3.2",
+  "condition": "nonexplicit_space",
+  "facial": {
+    "auIds": [
+      "4",
+      "7"
+    ],
+    "inputScale": "unknown_pyfeat_numeric_scale_verify_before_study",
+    "threshold": 0.6,
+    "requiredPositiveSamples": 2,
+    "windowMs": 15000,
+    "pollIntervalMs": 1800
+  },
+  "cooldownMs": 90000,
+  "speechTimeoutMs": 16000,
+  "responseTimeoutMs": 12000,
+  "prompts": [
+    "Hi! How has your week been going?",
+    "What has been taking up most of your time lately?",
+    "Is there anything else you'd like to share about your week?"
+  ],
+  "allowDeveloperManualAU": false,
+  "avatar": {
+    "au": "12",
+    "intensity": 25,
+    "notes": "0-100 scale inferred from helper example intensity 85; verify subtle smile visually"
+  },
+  "debug": {
+    "showAUReadings": true,
+    "notes": "Set false during participant study; debug readings may influence participants."
+  },
+  "speechMode": "eeva"
+}

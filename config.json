@@ -1,0 +1,6 @@
+{
+  "strategy": "tentative_uncertainty",
+  "triggerSource": "facial+verbal",
+  "sampleConfidence": 0.8,
+  "biofeedbackEngine": "pyfeat"
+}
