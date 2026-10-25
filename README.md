@@ -10,6 +10,12 @@ When a participant's face shows a tension pattern (AU4 brow lowerer and/or AU7 l
 - **Baseline scope.** The offline baseline tests the **decision rule**, not the accuracy of face or speech recognition. Its expected labels are design labels for the AND rule, not independent judgments of whether a check-in would feel appropriate.
 - **Facial analyzer.** The eEVA analyzer (instructor-selected, default `pyfeat`) is what runs today; the proposal plans OpenFace 3.0. Decide which the written project describes.
 
+## Study phases
+
+1. **Offline baseline (now).** The team plays the scenarios itself, presses **Start trial**, and annotates each result by hand. This tests only whether the cues fire the check-in when they should. No participant feedback is collected in `main.js`.
+2. **Scripted dialogue (next, not built).** A dialogue is drafted for the agent and a social actor (a team member or an actor). The agent fires automatically when concern is detected, each time with a new strategy. Randomized strategy order and the schedule log belong to this phase and are **not** implemented yet.
+3. **Participant phase (after that).** Participants watch the pre-recorded scenarios and answer the PETS questionnaire (how they would have felt in a similar circumstance), plus more specific helpfulness and engagement questions. This is where participant feedback is gathered, so the module has no Pause or Continue answers.
+
 ## Files
 
 | File | Purpose |
@@ -29,7 +35,7 @@ When a participant's face shows a tension pattern (AU4 brow lowerer and/or AU7 l
 |---|---|---|
 | `strategies` | The proposal's four VR-CoDES-P check-in strategies: `explicit_provides_space`, `explicit_reduces_space`, `nonexplicit_provides_space`, `nonexplicit_reduces_space`, plus the earlier `tentative_uncertainty` (see below). | The only values `strategy` may take. The sentence for each is defined by the platform's `createCheckInStrategy`, not in this repo. The four VR-CoDES-P identifiers are my naming; if the platform uses different ones, change them here. |
 | `strategy` | Which of the four strategies this run uses, passed to `createCheckInStrategy`. | Set per experimental condition. `nonexplicit_provides_space` is a placeholder default, not a research decision. |
-| `triggerSource` | Label passed to `getUtterance` describing what triggered the check-in. | Unknown whether `getUtterance` validates it. The real source (`facial+verbal` or `manual`) is recorded separately in the metrics log. |
+| `triggerSource` | Label passed to `getUtterance` describing what triggered the check-in. | Unknown whether `getUtterance` validates it. The real source (`facial+verbal`) is recorded separately in the metrics log. |
 | `sampleConfidence` | Confidence value passed to `getUtterance`. | A fixed placeholder (0.8), not measured from the face or speech. |
 | `biofeedbackEngine` | Name of the facial analyzer. | Used only if the platform setting `biofeedbackEngine` is absent; if both are missing, `pyfeat` is used. |
 
@@ -47,17 +53,17 @@ node trigger.js --binary       # manual yes/no AU4-like / AU7-like observation (
 
 ## eEVA module (`main.js`)
 
-Flow: start camera (`helpers.webcam.start`) and recognizer (`AudioToText`) → chained `helpers.biofeedback.analyzeVideo` loop tracks **peak** AU4/AU7 → experimenter clicks **Start trial** → `listenOnce()` captures the line → `evaluateCheckIn({aus: peak, transcript})` → if it fires, the strategy's utterance is spoken (`createCheckInStrategy` + `context.agent.speak`). **Pause** / **Continue** then answer that check-in via `strategy.handleUserResponse`.
-
+Flow: start camera (`helpers.webcam.start`) and recognizer (`AudioToText`) → chained `helpers.biofeedback.analyzeVideo` loop tracks **peak** AU4/AU7 → experimenter clicks **Start trial** → `listenOnce()` captures the line → `evaluateCheckIn({aus: peak, transcript})` → if it fires, the strategy's utterance is spoken (`createCheckInStrategy` + `context.agent.speak`).
 - `metrics` logs the decision, cue flags, matched phrases, peak AU4/AU7 and the threshold. The raw sentence is not logged.
-- **Check In** is a manual override that bypasses the gate. It is logged as `trigger_source=manual`. Do not use it during counted trials.
-- Status: verified only against a mock runtime, not yet confirmed working on sage.cs.fiu.edu.
+- **Strategy check.** The check that a strategy is usable (`createStrategy()` in `main.js`) requires only `getUtterance`, the method that produces the check-in sentence. The requirement for `handleUserResponse`, which processed the participant's Pause / Continue answer, is commented out along with those answers.
+- **Buttons.** Only **Start trial**, which runs one trial. The baseline is offline: the team plays each scenario and annotates the result by hand, so the module only needs to show whether the cues fired the check-in. The manual **Check In** button was replaced by Start trial and has been removed, as has the experimenter **Pause** that stopped the agent's voice, camera and microphone. The participant's **Pause** and **Continue / correct the agent** answers to a check-in are commented out in `main.js`, with the reason noted there, because participant feedback is out of scope for this module (see Study phases).
+- **Startup checks.** On every start `main.js` checks the platform functions it calls (webcam, analyzer, `wait`, `AudioToText`, `createCheckInStrategy`, `agent.speak`, metrics, overlay), prints the helper and context names, and lists any missing ones in the console and on the preview line. A missing metrics logger falls back to the console and a missing overlay to adding the panel to the page. A missing camera, analyzer or `createCheckInStrategy` still stops the affected step, with a message naming it.
+- Status: confirmed running on sage.cs.fiu.edu; **Start trial** works as intended.
 
 ### Open items before counted eEVA trials
 
-1. **Platform helpers.** On every start `main.js` checks the platform functions it calls (webcam, analyzer, `wait`, `AudioToText`, `createCheckInStrategy`, `agent.speak`, metrics, overlay), prints the helper and context names, and lists any missing ones in the console and on the preview line. A missing metrics logger falls back to the console and a missing overlay to adding the panel to the page. Missing camera, analyzer or `createCheckInStrategy` still stops the affected step, with a message naming it.
-2. **Strategy names.** At startup the console reports which of the four `strategies` names `createCheckInStrategy` accepts. If any are rejected, rename them in `config.json` to the identifiers the platform uses. Confirm this on the first run.
-3. **AU scale.** The scale of the analyzer's AU values is not documented. Compare the logged peak AU values against the threshold of 45 (it may be 0–1) before trusting decisions.
-4. **Peak vs. binary.** Peak-over-listening-window biases toward firing and differs from binary-mode observation. Do not merge eEVA and offline datasets.
-5. **Analyzer.** Pyfeat (eEVA) vs. OpenFace 3.0 (planned); see Research rationale.
-6. **Why `tentative_uncertainty` is kept.** It is not one of the four VR-CoDES-P strategies; it is the label from an earlier design iteration (a tentative, uncertain check-in). `CONFIG.checkInStrategy` in `trigger.js` and `trigger-core.js` still uses it. It only labels the demo output and does not affect any decision, and those files are frozen for the counted baseline, so it was left unchanged. It is listed in `config.json` so the name there matches the frozen files. Whether `createCheckInStrategy` accepts it is confirmed by the startup console report. Do not use it as an experimental condition unless the proposal says so.
+1. **Strategy names.** At startup the console reports which of the four `strategies` names `createCheckInStrategy` accepts. If any are rejected, rename them in `config.json` to the identifiers the platform uses. Confirm this on the first run.
+2. **AU scale.** The scale of the analyzer's AU values is not documented. Compare the logged peak AU values against the threshold of 45 (it may be 0–1) before trusting decisions.
+3. **Peak vs. binary.** Peak-over-listening-window biases toward firing and differs from binary-mode observation. Do not merge eEVA and offline datasets.
+4. **Analyzer.** Pyfeat (eEVA) vs. OpenFace 3.0 (planned); see Research rationale.
+5. **Why `tentative_uncertainty` is kept.** It is not one of the four VR-CoDES-P strategies; it is the label from an earlier design iteration (a tentative, uncertain check-in). `CONFIG.checkInStrategy` in `trigger.js` and `trigger-core.js` still uses it. It only labels the demo output and does not affect any decision, and those files are frozen for the counted baseline, so it was left unchanged. It is listed in `config.json` so the name there matches the frozen files. Whether `createCheckInStrategy` accepts it is confirmed by the startup console report. Do not use it as an experimental condition unless the proposal says so.

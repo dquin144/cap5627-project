@@ -4,7 +4,19 @@
  * What it does: during a trial the experimenter clicks "Start trial", the participant says a
  * line, and the module records the strongest AU4 / AU7 facial reading seen while they spoke.
  * The facial reading and the spoken words are passed to evaluateCheckIn(); only when BOTH show
- * a cue does the agent speak a check-in. Participant answers (Pause / Continue) are logged.
+ * a cue does the agent speak a check-in.
+ *
+ * Buttons: only "Start trial", which runs one trial. This is the offline baseline: the team
+ * plays the scenarios itself and annotates each result by hand, so the module only needs to
+ * answer "did the cues fire the check-in?".
+ *
+ * Out of scope for now, so commented out (not deleted) below: the participant's "Pause" and
+ * "Continue / correct the agent" answers to a spoken check-in. Participant feedback is not
+ * collected in this module. It will be gathered later from people watching recorded
+ * scenarios, using the PETS questionnaire plus helpfulness and engagement questions. The old
+ * manual "Check In" button was replaced by Start trial and has been removed, and so has the
+ * experimenter Pause that stopped the agent's voice, camera and microphone.
+ *
  * On start it also checks that the platform functions it needs exist and that the chosen
  * strategy is accepted, and reports any problem on screen and in the console.
  *
@@ -151,25 +163,26 @@ module.exports.run = async function run(context) {
   const prompt = document.createElement("p");
   prompt.textContent = "Preview";
 
-  // Participant's answers to a spoken check-in. Both stay disabled until a check-in is spoken.
-  const pause = document.createElement("button");
-  pause.type = "button";
-  pause.textContent = "Pause";
-  const continueButton = document.createElement("button");
-  continueButton.type = "button";
-  continueButton.textContent = "Continue / correct the agent";
-  pause.disabled = true;
-  continueButton.disabled = true;
+  // Out of scope for now: the participant's "Pause" and "Continue / correct the agent" answers
+  // to a spoken check-in. Both were passed to the strategy, and both stayed disabled until a
+  // check-in had been spoken. Participant feedback is not collected here; it will come from
+  // the PETS questionnaire and the helpfulness and engagement questions that people answer
+  // after watching recorded scenarios.
+  // const pause = document.createElement("button");
+  // pause.type = "button";
+  // pause.textContent = "Pause";
+  // const continueButton = document.createElement("button");
+  // continueButton.type = "button";
+  // continueButton.textContent = "Continue / correct the agent";
+  // pause.disabled = true;
+  // continueButton.disabled = true;
 
-  // True while a spoken check-in is waiting for the participant's Pause / Continue answer.
-  let awaitingResponse = false;
+  // Out of scope for now: true while a spoken check-in is waiting for the participant's
+  // answer (see the commented-out handleResponse near the end of run()).
+  // let awaitingResponse = false;
 
-  // Manual check-in that skips the trigger rule. For testing only, not for counted trials.
-  const checkInButton = document.createElement("button");
-  checkInButton.type = "button";
-  checkInButton.textContent = "Check In";
-
-  // Starts one trial: listen for the line and read the face at the same time.
+  // Starts one trial: listen for the line and read the face at the same time. Also starts
+  // the camera and microphone again if setup failed.
   // Stays disabled until the camera and recognizer are ready.
   const listenButton = document.createElement("button");
   listenButton.type = "button";
@@ -189,16 +202,17 @@ module.exports.run = async function run(context) {
   // Place for the camera preview when the project does not provide its own container.
   const camHost = document.createElement("div");
 
-  // Check-in strategy object created for the current check-in. Used to answer Pause / Continue.
+  // Check-in strategy object created for the current check-in.
   let strategy = null;
 
   // True while the microphone is open and AU readings should count toward the peak.
   let listening = false;
 
-  // True while a trial or manual check-in is running. Blocks overlapping clicks.
+  // True while a trial is running. Blocks overlapping Start trial clicks.
   let busy = false;
 
-  panel.append(prompt, statusLine, camHost, listenButton, checkInButton, pause, continueButton);
+  // With the participant answers brought back, also append pause and continueButton here.
+  panel.append(prompt, statusLine, camHost, listenButton);
   if (typeof context.ui?.mountOverlay === "function") {
     context.ui.mountOverlay(panel);
   } else {
@@ -233,11 +247,17 @@ module.exports.run = async function run(context) {
         (err && err.message ? err.message : err)
       );
     }
+    // Only getUtterance is needed to speak the check-in. The strategy's handleUserResponse
+    // processed the participant's Pause / Continue answer, which is out of scope for now, so
+    // a strategy is no longer rejected for lacking it. To require it again when the
+    // participant answers return, restore the commented line and the commented message.
     if (!created ||
-        typeof created.getUtterance !== "function" ||
-        typeof created.handleUserResponse !== "function") {
+        typeof created.getUtterance !== "function"
+        // || typeof created.handleUserResponse !== "function"
+    ) {
       throw new Error(
-        'Strategy "' + config.strategy + '" did not return getUtterance and handleUserResponse.'
+        'Strategy "' + config.strategy + '" did not return getUtterance.'
+        // 'Strategy "' + config.strategy + '" did not return getUtterance and handleUserResponse.'
       );
     }
     return created;
@@ -267,7 +287,7 @@ module.exports.run = async function run(context) {
 
   // ---------------------------------------------------------------
   // runCheckIn: build the check-in sentence, show it, log it and speak it.
-  // triggerSource says why it ran ("facial+verbal" or "manual") and is only used for logging.
+  // triggerSource says why it ran ("facial+verbal") and is only used for logging.
   // ---------------------------------------------------------------
   async function runCheckIn(triggerSource) {
     // Create the strategy named by config.strategy (validated against config.strategies).
@@ -295,28 +315,12 @@ module.exports.run = async function run(context) {
     await context.agent.speak(utterance);
     if (stopped) return;
 
-    // Now the participant can answer with Pause or Continue.
-    awaitingResponse = true;
-    pause.disabled = false;
-    continueButton.disabled = false;
+    // Out of scope for now: mark that a participant answer (Pause / Continue) is now expected
+    // and let them click it.
+    // awaitingResponse = true;
+    // pause.disabled = false;
+    // continueButton.disabled = false;
   }
-
-  // Manual check-in. It skips the trigger rule, so do not use it during counted trials.
-  checkInButton.addEventListener("click", async () => {
-    if (busy || stopped) return;
-    busy = true;
-    listenButton.disabled = true;
-    try {
-      // Logged as "manual" so these never mix with real triggered check-ins.
-      await runCheckIn("manual");
-    } catch (err) {
-      console.error("Manual check-in failed:", err);
-      setStatus("Check-in error: " + (err && err.message ? err.message : err));
-    } finally {
-      busy = false;
-      if (!stopped && camera && recognizer) listenButton.disabled = false;
-    }
-  });
 
   // ---------------------------------------------------------------
   // Facial AU analysis: keep the strongest AU4 and AU7 seen while the participant speaks.
@@ -354,6 +358,42 @@ module.exports.run = async function run(context) {
     return out;
   }
 
+  // True while the camera and recognizer are running. If setup failed, Start trial sees false
+  // and tries to start them again.
+  let sensorsOn = false;
+
+  // Starts the camera and the speech recognizer, then begins reading the face in the
+  // background. Returns true when both are running, or false if Stop cancelled it part-way
+  // (anything already started is shut down again).
+  async function startSensors() {
+    if (!helpers?.webcam || !helpers?.biofeedback) {
+      throw new Error("helpers.webcam / helpers.biofeedback not exposed on context.helpers (see console)");
+    }
+    const newCamera = await helpers.webcam.start(
+      (context.containerRef && context.containerRef.current) || camHost,
+      { overlay: true, width: 420, height: 315 }
+    );
+    if (stopped) {
+      newCamera?.stop?.();
+      return false;
+    }
+
+    const newRecognizer = new AudioToText();
+    await newRecognizer.initializeRecognizer();
+    if (stopped) {
+      newCamera?.stop?.();
+      newRecognizer.stopRecognition?.();
+      return false;
+    }
+
+    camera = newCamera;
+    recognizer = newRecognizer;
+    sensorsOn = true;
+    // Runs in the background until Stop, so it is deliberately not awaited.
+    analysisLoop();
+    return true;
+  }
+
   // Reads the camera over and over until Stop. Each pass waits for the previous analysis to
   // finish, so slow frames never pile up. While listening, it raises peak to the highest
   // reading seen.
@@ -376,11 +416,12 @@ module.exports.run = async function run(context) {
           }
         }
       } catch (err) {
+        if (stopped) return;
         console.error("AU analysis failed:", err);
-        // Pause briefly so a repeating error does not spin the loop.
+        // Wait briefly so a repeating error does not spin the loop.
         await helpers.wait(500);
       }
-      // Short pause between frames.
+      // Short wait between frames.
       await helpers.wait(120);
       if (stopped) return;
     }
@@ -404,7 +445,9 @@ module.exports.run = async function run(context) {
   // Captures the participant's spoken line and returns it as text ("" if nothing usable).
   async function captureLine() {
     speechEvents = 0;
-    onInterim = (text) => { if (!stopped) setStatus("Hearing: \"" + text + "\""); };
+    onInterim = (text) => {
+      if (!stopped) setStatus("Hearing: \"" + text + "\"");
+    };
 
     // Step 1: confirm the browser allows microphone access before listening.
     try {
@@ -445,6 +488,11 @@ module.exports.run = async function run(context) {
     busy = true;
     listenButton.disabled = true;
     try {
+      // If setup failed earlier, start the camera and microphone now.
+      if (!sensorsOn) {
+        setStatus("Restarting camera and microphone...");
+        if (!(await startSensors())) return;
+      }
       resetPeak();
       listening = true;
       setStatus("Listening... say the line now.");
@@ -505,51 +553,41 @@ module.exports.run = async function run(context) {
   // Setup: start the camera and the recognizer, then begin reading the face.
   // ---------------------------------------------------------------
   try {
-    if (!helpers?.webcam || !helpers?.biofeedback) {
-      throw new Error("helpers.webcam / helpers.biofeedback not exposed on context.helpers (see console)");
+    if (await startSensors()) {
+      listenButton.disabled = false;
+      setStatus("Ready. Click Start trial, then have the participant say the line.");
     }
-    camera = await helpers.webcam.start(
-      (context.containerRef && context.containerRef.current) || camHost,
-      { overlay: true, width: 420, height: 315 }
-    );
-    if (stopped) return;
-
-    recognizer = new AudioToText();
-    await recognizer.initializeRecognizer();
-    if (stopped) return;
-
-    // Runs in the background until Stop, so it is deliberately not awaited.
-    analysisLoop();
-    listenButton.disabled = false;
-    setStatus("Ready. Click Start trial, then have the participant say the line.");
   } catch (err) {
     console.error("Webcam/recognizer setup failed:", err);
-    setStatus("Setup failed: " + (err && err.message ? err.message : err) + " (manual Check In still works)");
+    setStatus("Setup failed: " + (err && err.message ? err.message : err) + " (Start trial will try again)");
+    // Let Start trial retry the setup instead of leaving the panel unusable.
+    listenButton.disabled = false;
   }
 
   // ---------------------------------------------------------------
-  // Participant response: Pause or Continue, answering the most recent check-in once.
+  // Out of scope for now: participant response (Pause / Continue). It passed the answer to the
+  // strategy, which said whether to accept it and what the agent replies if not. Participant
+  // feedback is gathered later, from people watching recorded scenarios, not in this module.
   // ---------------------------------------------------------------
-  async function handleResponse(response) {
-    if (!awaitingResponse || !strategy || stopped) return;
-    awaitingResponse = false;
-    pause.disabled = true;
-    continueButton.disabled = true;
-    // The strategy says whether it accepts the response and what the agent replies if it does not.
-    const outcome = strategy.handleUserResponse(response);
-    metrics.record(
-      "user_response",
-      outcome.accepted ? "accepted" : "rejected",
-      response
-    );
-    if (!outcome.accepted) {
-      await context.agent.speak(outcome.reply);
-    }
-  }
-  pause.addEventListener("click", () => handleResponse("pause"));
-  continueButton.addEventListener("click", () => handleResponse("continue"));
+  // async function handleResponse(response) {
+  //   if (!awaitingResponse || !strategy || stopped) return;
+  //   awaitingResponse = false;
+  //   pause.disabled = true;
+  //   continueButton.disabled = true;
+  //   const outcome = strategy.handleUserResponse(response);
+  //   metrics.record(
+  //     "user_response",
+  //     outcome.accepted ? "accepted" : "rejected",
+  //     response
+  //   );
+  //   if (!outcome.accepted) {
+  //     await context.agent.speak(outcome.reply);
+  //   }
+  // }
+  // pause.addEventListener("click", () => handleResponse("pause"));
+  // continueButton.addEventListener("click", () => handleResponse("continue"));
 
-  // Keep run() open until the platform signals cleanup, so the buttons stay active.
+  // Keep run() open until the platform signals cleanup, so Start trial stays active.
   await new Promise((resolve) => context.onCleanup(() => resolve()));
 };
 
