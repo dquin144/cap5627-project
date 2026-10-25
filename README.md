@@ -32,7 +32,7 @@ When a participant's face shows a brow-lowering movement (AU4) **and** they voic
 | `AU_SELECTION_RATIONALE.md` | Why AU4, and the history of AU7 (tried with PyFeat, dropped). |
 | `BASELINE_PROTOCOL.md`, `TRIAL_PROCEDURE.md`, `TEST_SCENARIOS.md` | Baseline protocol (the instructor's eight sections), per-trial procedure, and the scenario conditions. |
 
-The earlier offline fallback (the command-line trigger v0.3 with its demo, numeric and binary modes, plus the offline baseline documents) is the commit `ab2cded` published by dquin144 ("added few more keywords"). The tag `fallback-binary-v0.3` marks it. The later drafts that were removed are in the branch history before this change.
+The earlier offline fallback (the command-line trigger v0.3 with its demo, numeric and binary modes, plus the offline baseline documents) is the commit `ab2cded` published by dquin144 ("added few more keywords"). The later drafts that were removed are in the branch history before this change.
 
 ## config.json settings
 
