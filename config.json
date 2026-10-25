@@ -3,11 +3,10 @@
     "explicit_provides_space",
     "explicit_reduces_space",
     "nonexplicit_provides_space",
-    "nonexplicit_reduces_space",
-    "tentative_uncertainty"
+    "nonexplicit_reduces_space"
   ],
   "strategy": "nonexplicit_provides_space",
   "triggerSource": "facial+verbal",
   "sampleConfidence": 0.8,
-  "biofeedbackEngine": "pyfeat"
+  "biofeedbackEngine": "openface3"
 }

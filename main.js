@@ -2,20 +2,15 @@
  * Context-Aware Empathic Check-In: eEVA Project Studio entry point.
  *
  * What it does: during a trial the experimenter clicks "Start trial", the participant says a
- * line, and the module records the strongest AU4 / AU7 facial reading seen while they spoke.
+ * line, and the module records the strongest AU4 facial reading seen while they spoke.
  * The facial reading and the spoken words are passed to evaluateCheckIn(); only when BOTH show
  * a cue does the agent speak a check-in.
  *
- * Buttons: only "Start trial", which runs one trial. This is the offline baseline: the team
- * plays the scenarios itself and annotates each result by hand, so the module only needs to
- * answer "did the cues fire the check-in?".
- *
- * Out of scope for now, so commented out (not deleted) below: the participant's "Pause" and
- * "Continue / correct the agent" answers to a spoken check-in. Participant feedback is not
- * collected in this module. It will be gathered later from people watching recorded
- * scenarios, using the PETS questionnaire plus helpfulness and engagement questions. The old
- * manual "Check In" button was replaced by Start trial and has been removed, and so has the
- * experimenter Pause that stopped the agent's voice, camera and microphone.
+ * Buttons: "Start trial", which runs one trial, and "Capture AU (dry run)", a dry-run-only
+ * tool that is not part of the frozen baseline (see the DRY-RUN TOOL block). This is the
+ * baseline on eEVA with OpenFace 3.0: an experimenter presses Start trial and annotates each
+ * result by hand, so the module only needs to answer "did the cues fire the check-in?". The
+ * participant is a teammate or classmate, and no video or audio is kept.
  *
  * On start it also checks that the platform functions it needs exist and that the chosen
  * strategy is accepted, and reports any problem on screen and in the console.
@@ -31,8 +26,8 @@ const config = require("./config.json");
 
 // CONFIG holds the AU threshold, the AU ids to watch and the distress phrase list.
 // evaluateCheckIn(...) applies the rule: facial cue AND verbal cue.
-// trigger-core.js is the browser-safe copy of trigger.js, which cannot load in eEVA.
-const { CONFIG, evaluateCheckIn } = require("./trigger-core.js");
+// trigger.js is the single copy of the decision logic.
+const { CONFIG, evaluateCheckIn } = require("./trigger.js");
 
 // ---------------------------------------------------------------
 // Shared state. Declared at module level so stop() can release it.
@@ -54,11 +49,21 @@ let finishListening = null;
 // True once Stop has been pressed. Checked after every await so work ends quietly.
 let stopped = false;
 
+// Longest time a trial listens for the participant's line, in milliseconds. A trial's peak
+// AU window runs from Start trial until the speech ends (1.2 s of silence), and never longer
+// than this. The Capture AU dry-run tool uses it as its capture window.
+const LISTEN_MAX_WAIT_MS = 8000;
+
 // Number of recognizer callbacks received during the current listen.
 let speechEvents = 0;
 
 // Optional callback that receives each partial transcript so it can be shown on screen.
 let onInterim = null;
+
+// Optional callback that receives the analyzer's raw AU result for every frame the analysis
+// loop reads while listening is on. Only the dry-run Capture AU tool sets it (to list every
+// AU the analyzer returns); it stays null otherwise.
+let onAuFrame = null;
 
 // ---------------------------------------------------------------
 // listenOnce: capture one spoken answer.
@@ -66,7 +71,8 @@ let onInterim = null;
 // maxWaitMs so a silent participant can never freeze the trial.
 // Returns the final transcript, or "" if nothing was said.
 // ---------------------------------------------------------------
-function listenOnce(silenceMs = 1200, maxWaitMs = 8000) {
+// Original: function listenOnce(silenceMs = 1200, maxWaitMs = 8000) {
+function listenOnce(silenceMs = 1200, maxWaitMs = LISTEN_MAX_WAIT_MS) {
   return new Promise((resolve) => {
     // Most recent transcript from the recognizer. It is refined as the person keeps talking.
     let latest = "";
@@ -142,7 +148,7 @@ module.exports.run = async function run(context) {
     console.log("All required platform pieces are available.");
   }
 
-  // Metrics logger. Every trial decision and participant response is recorded here. If the
+  // Metrics logger. Every trial decision is recorded here. If the
   // platform has no metrics helper, records go to the console instead so trials still run.
   const metrics = context.metrics?.create
     ? context.metrics.create("distress-check-in")
@@ -162,24 +168,6 @@ module.exports.run = async function run(context) {
   // Shows the check-in sentence the agent is about to say or has just said.
   const prompt = document.createElement("p");
   prompt.textContent = "Preview";
-
-  // Out of scope for now: the participant's "Pause" and "Continue / correct the agent" answers
-  // to a spoken check-in. Both were passed to the strategy, and both stayed disabled until a
-  // check-in had been spoken. Participant feedback is not collected here; it will come from
-  // the PETS questionnaire and the helpfulness and engagement questions that people answer
-  // after watching recorded scenarios.
-  // const pause = document.createElement("button");
-  // pause.type = "button";
-  // pause.textContent = "Pause";
-  // const continueButton = document.createElement("button");
-  // continueButton.type = "button";
-  // continueButton.textContent = "Continue / correct the agent";
-  // pause.disabled = true;
-  // continueButton.disabled = true;
-
-  // Out of scope for now: true while a spoken check-in is waiting for the participant's
-  // answer (see the commented-out handleResponse near the end of run()).
-  // let awaitingResponse = false;
 
   // Starts one trial: listen for the line and read the face at the same time. Also starts
   // the camera and microphone again if setup failed.
@@ -208,10 +196,13 @@ module.exports.run = async function run(context) {
   // True while the microphone is open and AU readings should count toward the peak.
   let listening = false;
 
-  // True while a trial is running. Blocks overlapping Start trial clicks.
+  // True while a trial or a Capture AU run is in progress. Blocks overlapping clicks.
   let busy = false;
 
-  // With the participant answers brought back, also append pause and continueButton here.
+  // Switches the dry-run Capture AU button on or off. It does nothing unless the dry-run tool
+  // block below is active, so the trial code can call it whether or not that block exists.
+  let setDryRunEnabled = () => {};
+
   panel.append(prompt, statusLine, camHost, listenButton);
   if (typeof context.ui?.mountOverlay === "function") {
     context.ui.mountOverlay(panel);
@@ -247,17 +238,10 @@ module.exports.run = async function run(context) {
         (err && err.message ? err.message : err)
       );
     }
-    // Only getUtterance is needed to speak the check-in. The strategy's handleUserResponse
-    // processed the participant's Pause / Continue answer, which is out of scope for now, so
-    // a strategy is no longer rejected for lacking it. To require it again when the
-    // participant answers return, restore the commented line and the commented message.
-    if (!created ||
-        typeof created.getUtterance !== "function"
-        // || typeof created.handleUserResponse !== "function"
-    ) {
+    // Only getUtterance is needed to speak the check-in.
+    if (!created || typeof created.getUtterance !== "function") {
       throw new Error(
         'Strategy "' + config.strategy + '" did not return getUtterance.'
-        // 'Strategy "' + config.strategy + '" did not return getUtterance and handleUserResponse.'
       );
     }
     return created;
@@ -313,28 +297,26 @@ module.exports.run = async function run(context) {
       throw new Error("context.agent.speak is not available in this project.");
     }
     await context.agent.speak(utterance);
-    if (stopped) return;
-
-    // Out of scope for now: mark that a participant answer (Pause / Continue) is now expected
-    // and let them click it.
-    // awaitingResponse = true;
-    // pause.disabled = false;
-    // continueButton.disabled = false;
   }
 
   // ---------------------------------------------------------------
-  // Facial AU analysis: keep the strongest AU4 and AU7 seen while the participant speaks.
+  // Facial AU analysis: keep the strongest reading of each watched AU (AU4) seen while the
+  // participant speaks.
   // ---------------------------------------------------------------
 
   // Platform helper functions: webcam, biofeedback (AU analysis) and wait.
   const helpers = context.helpers;
 
   // Strongest reading of each watched AU during the current listen,
-  // for example { "4": 31.2, "7": 12.0 }. This is the facial input to evaluateCheckIn().
+  // for example { "4": 31.2 }. This is the facial input to evaluateCheckIn().
   let peak = {};
 
   // Most recent single-frame reading, in the same shape as peak.
   let latest = {};
+
+  // The peak of every watched AU as log text, for example "peak_au4=31.2".
+  const peakDetail = () =>
+    CONFIG.facialAUs.map((id) => "peak_au" + id + "=" + peak[id]).join(";");
 
   // Sets every watched AU in peak back to 0 at the start of a trial.
   const resetPeak = () => {
@@ -343,7 +325,7 @@ module.exports.run = async function run(context) {
   };
   resetPeak();
 
-  // Turns one analyzer result into { "4": n, "7": n }: the strongest intensity per watched AU.
+  // Turns one analyzer result into { "4": n }: the strongest intensity per watched AU.
   // The analyzer may label an AU "AU04", "4" or "4L" / "4R", so labels are reduced to the
   // plain number first. AUs that are not found stay 0.
   function extractCueAUs(aus) {
@@ -357,6 +339,14 @@ module.exports.run = async function run(context) {
     }
     return out;
   }
+
+  // Analyzer name: the platform setting if present, then config.json, then "openface3", the
+  // baseline's analyzer.
+  // Original last fallback: "pyfeat".
+  const analyzerEngine =
+    (context.settings && context.settings.biofeedbackEngine) ||
+    config.biofeedbackEngine ||
+    "openface3";
 
   // True while the camera and recognizer are running. If setup failed, Start trial sees false
   // and tries to start them again.
@@ -398,14 +388,15 @@ module.exports.run = async function run(context) {
   // finish, so slow frames never pile up. While listening, it raises peak to the highest
   // reading seen.
   async function analysisLoop() {
-    // Analyzer name: the platform setting if present, then config.json, then "pyfeat".
-    const engine =
-      (context.settings && context.settings.biofeedbackEngine) ||
-      config.biofeedbackEngine ||
-      "pyfeat";
+    // Original: the engine was worked out here with the same three-step fallback. It now
+    // lives in analyzerEngine (above) so the Capture AU tool can show the same name.
+    // const engine =
+    //   (context.settings && context.settings.biofeedbackEngine) ||
+    //   config.biofeedbackEngine ||
+    //   "pyfeat"; (now "openface3")
     while (!stopped) {
       try {
-        const result = await helpers.biofeedback.analyzeVideo(camera.video, engine);
+        const result = await helpers.biofeedback.analyzeVideo(camera.video, analyzerEngine);
         if (stopped) return;
         if (result && result.aus) {
           latest = extractCueAUs(result.aus);
@@ -413,6 +404,8 @@ module.exports.run = async function run(context) {
             CONFIG.facialAUs.forEach((id) => {
               peak[id] = Math.max(peak[id], latest[id]);
             });
+            // Dry-run hook: hands Capture AU the raw result so it can list every AU returned.
+            onAuFrame?.(result.aus);
           }
         }
       } catch (err) {
@@ -481,12 +474,14 @@ module.exports.run = async function run(context) {
   }
 
   // ---------------------------------------------------------------
-  // One trial: listen to the line while tracking peak AU4 / AU7, decide, then maybe check in.
+  // One trial: listen to the line while tracking the peak AU4, decide, then maybe check in.
   // ---------------------------------------------------------------
   listenButton.addEventListener("click", async () => {
     if (busy || stopped) return;
     busy = true;
     listenButton.disabled = true;
+    // Capture AU stays off from the start of the trial until the dialogue has finished.
+    setDryRunEnabled(false);
     try {
       // If setup failed earlier, start the camera and microphone now.
       if (!sensorsOn) {
@@ -507,7 +502,7 @@ module.exports.run = async function run(context) {
             ? "No speech events received from the recognizer. Check the mic (see console) and retry."
             : "Speech was heard but no usable transcript. Click Start trial to retry."
         );
-        metrics.record("trigger_decision", "no_speech", "peak_au4=" + peak["4"] + ";peak_au7=" + peak["7"]);
+        metrics.record("trigger_decision", "no_speech", peakDetail());
         return;
       }
 
@@ -516,8 +511,8 @@ module.exports.run = async function run(context) {
       const result = evaluateCheckIn({ aus: peak, transcript });
 
       setStatus(
-        "Heard: \"" + transcript + "\" | AU4 peak " + peak["4"].toFixed(1) +
-        ", AU7 peak " + peak["7"].toFixed(1) +
+        "Heard: \"" + transcript + "\" | " +
+        CONFIG.facialAUs.map((id) => "AU" + id + " peak " + peak[id].toFixed(1)).join(", ") +
         " | Facial: " + result.facialCue + ", Verbal: " + result.verbalCue +
         " -> " + (result.shouldTrigger ? "CHECK IN" : "DO NOT CHECK IN")
       );
@@ -528,8 +523,7 @@ module.exports.run = async function run(context) {
         result.shouldTrigger ? "check_in" : "no_check_in",
         "facial=" + result.facialCue +
           ";verbal=" + result.verbalCue +
-          ";peak_au4=" + peak["4"] +
-          ";peak_au7=" + peak["7"] +
+          ";" + peakDetail() +
           ";threshold=" + CONFIG.auThreshold +
           ";aus=" + (result.matchedAUs.join(",") || "none") +
           ";phrases=" + (result.matchedPhrases.join(",") || "none")
@@ -543,11 +537,180 @@ module.exports.run = async function run(context) {
       console.error("Trial failed:", err);
       setStatus("Trial error: " + (err && err.message ? err.message : err));
     } finally {
+      // Runs after a check-in finished speaking, after a "do not check in" decision was
+      // shown, and after any error, so the buttons always come back.
       listening = false;
       busy = false;
-      if (!stopped) listenButton.disabled = false;
+      if (!stopped) {
+        listenButton.disabled = false;
+        setDryRunEnabled(true);
+      }
     }
   });
+
+  // ===== DRY-RUN TOOL START =====
+  // Dry runs only. NOT part of the frozen baseline; kept for later OpenFace 3.0 dry runs.
+  // At the freeze, comment out this whole block (the button creation included). The
+  // setDryRunEnabled() calls and the onAuFrame hook outside it then stay inert.
+  //
+  // Capture AU shows every AU the analyzer returns for the current face, with the peak and the
+  // mean of each over the capture window, so the team can see which AUs exist at all (for
+  // example whether the watched AU4 is returned), check the AU scale, set the threshold,
+  // and decide whether a per-user neutral calibration is needed. It listens to no speech,
+  // speaks nothing and never checks in. Its numbers are never trial data and are not written
+  // to the metrics log.
+
+  // Length of the capture: the longest window a trial can use for its peak.
+  const captureWindowMs = LISTEN_MAX_WAIT_MS;
+
+  const captureButton = document.createElement("button");
+  captureButton.type = "button";
+  captureButton.textContent = "Capture AU (dry run)";
+  captureButton.disabled = true;
+  panel.append(captureButton);
+
+  setDryRunEnabled = (enabled) => { captureButton.disabled = !enabled; };
+
+  captureButton.addEventListener("click", async () => {
+    if (busy || stopped) return;
+    busy = true;
+    // Capture AU and Start trial never run at the same time.
+    captureButton.disabled = true;
+    listenButton.disabled = true;
+    try {
+      // If setup failed earlier, start the camera now, as Start trial does.
+      if (!sensorsOn) {
+        setStatus("Restarting camera and microphone...");
+        if (!(await startSensors())) return;
+      }
+
+      // Same face reading as a trial: while `listening` is true the analysis loop reads the
+      // camera. The hook below also records every AU the analyzer returns, under the label
+      // the analyzer uses (for example "AU04" or "4L"): the highest value, and the total for
+      // the mean.
+      resetPeak();
+      const peaks = {};
+      const sums = {};
+      let samples = 0;
+      // Show line breaks in the status text (one AU per line).
+      statusLine.style.whiteSpace = "pre-line";
+      onAuFrame = (rawAus) => {
+        samples++;
+        // The first raw result is printed once, so its real shape can be inspected.
+        if (samples === 1) console.log("[dry_run_capture] raw analyzer result (first frame):", rawAus);
+        // One value per AU in this frame, on the 0-100 scale the trial uses. The analyzer
+        // can report the same AU under two labels ("AU1" on a 0-1 scale and "AU01" on 0-100),
+        // so labels are reduced to one name per AU first: "AU04" and "AU4" both become "AU4",
+        // and an L/R side letter is kept ("4L" -> "AU4L").
+        const nameOf = (label) => {
+          const m = String(label).match(/(\d+)([LR])?/i);
+          return m ? "AU" + parseInt(m[1], 10) + (m[2] ? m[2].toUpperCase() : "") : String(label);
+        };
+        // getTopAUs gives the values the trial reads (0-100). It leaves out AUs it considers
+        // not detected.
+        const trialValues = {};
+        (helpers.biofeedback.getTopAUs(rawAus, 100) || []).forEach((item) => {
+          const v = Number(item.intensity);
+          if (Number.isFinite(v)) {
+            const name = nameOf(item.au);
+            trialValues[name] = Math.max(trialValues[name] ?? -Infinity, v);
+          }
+        });
+        // The raw result is read as well (a list of {au, intensity} items, or an object of
+        // label -> number) so AUs that getTopAUs left out still appear, at their raw value.
+        const rawValues = {};
+        const keepRaw = (label, value) => {
+          const v = Number(value);
+          if (!label || !Number.isFinite(v)) return;
+          const name = nameOf(label);
+          rawValues[name] = Math.max(rawValues[name] ?? -Infinity, v);
+        };
+        if (Array.isArray(rawAus)) {
+          rawAus.forEach((item) => {
+            keepRaw(String(item?.au ?? item?.name ?? item?.id ?? item?.label ?? ""),
+                    item?.intensity ?? item?.value ?? item?.score);
+          });
+        } else if (rawAus && typeof rawAus === "object") {
+          Object.entries(rawAus).forEach(([label, value]) => keepRaw(label, value));
+        }
+        // The trial's value wins. An AU only in the raw result is shown at its raw value
+        // (normally 0, so the scale does not matter).
+        const names = new Set([...Object.keys(trialValues), ...Object.keys(rawValues)]);
+        names.forEach((name) => {
+          const value = trialValues[name] ?? rawValues[name];
+          peaks[name] = Math.max(peaks[name] ?? -Infinity, value);
+          sums[name] = (sums[name] ?? 0) + value;
+        });
+      };
+
+      setStatus("Capture AU: hold the face for " + (captureWindowMs / 1000) + " s...");
+      listening = true;
+      await helpers.wait(captureWindowMs);
+      listening = false;
+      onAuFrame = null;
+      if (stopped) return;
+
+      // Show the result on the status line (and in the console).
+      // Short numbers: 1 decimal from 10 up, 2 decimals below (so 0-1 scales stay readable).
+      const fmt = (n) => Number(n.toFixed(n >= 10 ? 1 : 2));
+      // The plain AU number in a label: "AU04" -> "4", "4L" -> "4".
+      const idOf = (label) => String(parseInt(label.replace(/\D/g, ""), 10));
+      const shown = (label) => (/^au/i.test(label) ? label : "AU" + label);
+      const labels = Object.keys(peaks).sort(
+        (a, b) => (idOf(a) - idOf(b)) || a.localeCompare(b)
+      );
+      // Peak and mean (over all samples) of every AU returned. * marks a watched AU (AU4)
+      // whose peak is at or above the threshold.
+      const rows = labels.map((label) => ({
+        label,
+        peak: fmt(peaks[label]),
+        avg: fmt(sums[label] / samples),
+        atOrAboveThreshold:
+          CONFIG.facialAUs.includes(idOf(label)) && peaks[label] >= CONFIG.auThreshold
+      }));
+      // Watched AUs the analyzer never returned (the reason AU7 is no longer watched: OpenFace
+      // 3.0 does not return it).
+      const returnedIds = new Set(labels.map(idOf));
+      const notReturned = CONFIG.facialAUs.filter((id) => !returnedIds.has(id));
+      // One line of header, then one AU per line: "AU4: 61 Peak, 20 Avg".
+      setStatus(
+        "Capture AU: " + captureWindowMs + " ms | " + analyzerEngine +
+        " | threshold " + CONFIG.auThreshold + " | " + samples + " samples" +
+        (samples === 0
+          ? "\nNo AU readings received (check the camera and analyzer)."
+          : (rows.length
+              ? "\n" + rows.map((r) =>
+                  shown(r.label) + ": " + r.peak + " Peak, " + r.avg + " Avg" +
+                  (r.atOrAboveThreshold ? "*" : "")
+                ).join("\n") + "\n(* at or above threshold)"
+              : "\nNo AUs returned.") +
+            (notReturned.length
+              ? "\nNot returned: " + notReturned.map((id) => "AU" + id).join(", ")
+              : ""))
+      );
+      console.log("[dry_run_capture]", {
+        windowMs: captureWindowMs,
+        engine: analyzerEngine,
+        threshold: CONFIG.auThreshold,
+        samples,
+        rows,
+        notReturned
+      });
+    } catch (err) {
+      console.error("Capture AU failed:", err);
+      setStatus("Capture AU error: " + (err && err.message ? err.message : err));
+    } finally {
+      listening = false;
+      onAuFrame = null;
+      busy = false;
+      // Feedback is shown (or the capture failed): enable all buttons.
+      if (!stopped) {
+        listenButton.disabled = false;
+        captureButton.disabled = false;
+      }
+    }
+  });
+  // ===== DRY-RUN TOOL END =====
 
   // ---------------------------------------------------------------
   // Setup: start the camera and the recognizer, then begin reading the face.
@@ -555,6 +718,7 @@ module.exports.run = async function run(context) {
   try {
     if (await startSensors()) {
       listenButton.disabled = false;
+      setDryRunEnabled(true);
       setStatus("Ready. Click Start trial, then have the participant say the line.");
     }
   } catch (err) {
@@ -562,30 +726,8 @@ module.exports.run = async function run(context) {
     setStatus("Setup failed: " + (err && err.message ? err.message : err) + " (Start trial will try again)");
     // Let Start trial retry the setup instead of leaving the panel unusable.
     listenButton.disabled = false;
+    setDryRunEnabled(true);
   }
-
-  // ---------------------------------------------------------------
-  // Out of scope for now: participant response (Pause / Continue). It passed the answer to the
-  // strategy, which said whether to accept it and what the agent replies if not. Participant
-  // feedback is gathered later, from people watching recorded scenarios, not in this module.
-  // ---------------------------------------------------------------
-  // async function handleResponse(response) {
-  //   if (!awaitingResponse || !strategy || stopped) return;
-  //   awaitingResponse = false;
-  //   pause.disabled = true;
-  //   continueButton.disabled = true;
-  //   const outcome = strategy.handleUserResponse(response);
-  //   metrics.record(
-  //     "user_response",
-  //     outcome.accepted ? "accepted" : "rejected",
-  //     response
-  //   );
-  //   if (!outcome.accepted) {
-  //     await context.agent.speak(outcome.reply);
-  //   }
-  // }
-  // pause.addEventListener("click", () => handleResponse("pause"));
-  // continueButton.addEventListener("click", () => handleResponse("continue"));
 
   // Keep run() open until the platform signals cleanup, so Start trial stays active.
   await new Promise((resolve) => context.onCleanup(() => resolve()));
