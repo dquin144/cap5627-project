@@ -11,7 +11,7 @@ Items in **[TO BE SUPPLIED]** are decisions the team has not made yet. They are 
 ## 1. Setup
 
 - eEVA project and module on sage.cs.fiu.edu, browser, webcam, microphone or headset, room and lighting.
-- Version fields, recorded at the freeze (see README, Freeze procedure): eEVA project and module, date frozen, commit hash, analyzer (`openface3`), `auThreshold`, the peak/listening window, the keyword list, and the fixed `strategy` value.
+- Version fields, recorded at the freeze (see README, Freeze procedure): version **v0.4** (shown on the panel at startup and written with every trial decision), eEVA project and module, date frozen, commit hash, analyzer (`openface3`), `auThreshold`, the peak/listening window, the keyword list, and the fixed `strategy` value.
 - Keep the code, threshold, window and keyword list unchanged during counted trials.
 - The Team 3.2 trial log (Excel tab "3.2 Check-in"). Do not edit the shaded formula cells.
 
@@ -30,7 +30,7 @@ Items in **[TO BE SUPPLIED]** are decisions the team has not made yet. They are 
 
 ## 5. Steps
 
-- Do dry runs first (use **Capture AU** to learn the AU scale and set the threshold). Mark them "dry run" in Notes; they never count.
+- Dry runs come first (they used **Capture AU** to learn the AU scale and set the threshold). Mark them "dry run" in Notes; they never count. The dry runs are finished and Capture AU is commented out; **Start trial** is the only button in the baseline.
 - Each participant gets one randomly assigned set of scenarios, **assigned offline by hand** (no code). Record the order in Notes.
 - The experimenter presses **Start trial**; the participant performs the card. Timing: **[TO BE SUPPLIED]**.
 - Before the run, write down the condition and `Should fire?`. After the run, read the module's decision.
@@ -93,7 +93,7 @@ Save the trial log, thank the participant, and give a one-line debrief.
 ## Limitations
 
 - The expected labels are design labels from the condition; they are not independent judgments of whether a check-in would feel appropriate. In condition C a person may reasonably want a check-in despite a neutral face.
-- The threshold is provisional until set from the dry runs. Negation and paraphrases are not handled by the keyword list.
+- The threshold comes from a small number of dry runs and is not formally calibrated. Negation and paraphrases are not handled by the keyword list.
 - Confirm with the instructor that live posing in eEVA is acceptable.
 
 ## Open decisions for the team
@@ -101,5 +101,5 @@ Save the trial log, thank the participant, and give a one-line debrief.
 1. Match and emotions: the template's Match compares an analyzer-emotion column with self-reported emotion; that analyzer column is not in the recorded list, so Match will be blank. Add the column, or drop Match. Decide when and how self-reported emotion is asked.
 2. The verbal cue column: the VR-CoDES category of the scripted line (design label), or what the trigger detected? Assumed: the scripted line's category.
 3. A "set" of scenarios: assumed to be one trial per condition A–D per participant. Confirm.
-4. The version name for the frozen build (propose v0.4).
+4. ~~The version name for the frozen build.~~ Decided: **v0.4**.
 5. False-trigger rate: keep or drop? The earlier documents reported it; the current list omits it.

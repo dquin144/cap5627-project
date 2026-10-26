@@ -7,7 +7,7 @@
  * concern) are both present. AU7 was originally a second facial cue and was dropped; the
  * reasons are in AU_SELECTION_RATIONALE.md. See the README for the research rationale.
  *
- * Frozen once the baseline is frozen: after that, any change to the rule, the phrase list or
+ * Frozen with the baseline as v0.4 (the VERSION constant in main.js): after that, any change to the rule, the phrase list or
  * the threshold means a new version and a restart of the counted trials.
  */
 
@@ -17,7 +17,7 @@
 
 const CONFIG = {
   // Minimum AU intensity (on the 0-100 scale the trial reads) that counts as a facial cue.
-  // Provisional and uncalibrated: it is set from the Capture AU dry runs.
+  // Set from the Capture AU dry runs (now finished); not formally calibrated.
   auThreshold: 45, // Provisional, not calibrated
 
   // Action Unit ids watched for the facial cue: AU4 (brow lowerer) only. AU7 (lid tightener)
