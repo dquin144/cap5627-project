@@ -4,7 +4,7 @@
 
 - **AU4 — brow lowerer:** A visible brow-lowering movement potentially associated with frowning, concern, or concentration.
 
-We chose it as a **simple, observable candidate facial cue**, not a reliable stand-alone indicator of sadness, stress, or emotional distress. Its meaning depends on context. Our baseline therefore requires **a facial cue AND a verbal distress cue** before issuing a check-in. The baseline reads AU4 from OpenFace 3.0 on eEVA, which is **not formally validated FACS coding**. The numeric threshold of 45 (on the 0–100 scale the trial reads) is provisional and uncalibrated; it is set from the dry-run readings.
+We chose it as a **simple, observable candidate facial cue**, not a reliable stand-alone indicator of sadness, stress, or emotional distress. Its meaning depends on context. Our baseline therefore requires **a facial cue AND a verbal distress cue** before issuing a check-in. The baseline reads AU4 from OpenFace 3.0 on eEVA, which is **not formally validated FACS coding**. The numeric threshold of 45 (on the 0–100 scale the trial reads) comes from the dry-run readings and is not formally calibrated.
 
 ## AU7 was originally the second facial cue, and was dropped
 
@@ -24,4 +24,4 @@ The facial cue is now AU4 alone. The code keeps the original `["4", "7"]` as a c
 
 Our P1 proposal cites **Gentsch et al. (2015)** on relationships between facial muscle activity and emotional appraisal, while cautioning against treating any single movement as proof of emotion. It also cites **Zimmermann et al. (2011)** (VR-CoDES) for verbal expressions of concern. Those sources support combining facial behavior and verbal context; **they do not establish AU4 (or AU7) as validated distress markers or determine our threshold**.
 
-**Next step:** Use the Capture AU dry runs to see the AU4 values OpenFace 3.0 returns, set the threshold from them, and revise the cue selection based on data and feedback.
+**Status:** The Capture AU dry runs with OpenFace 3.0 are finished and the tool is commented out for the baseline. Revise the cue selection based on the baseline data and feedback.

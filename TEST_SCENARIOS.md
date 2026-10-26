@@ -2,7 +2,7 @@
 
 **Purpose:** Test the end-to-end check-in trigger on eEVA (OpenFace 3.0 peak AU4, speech-to-text, phrase match, AND rule). Each trial belongs to one of four conditions, and an experimenter presses **Start trial** and annotates the result. See `BASELINE_PROTOCOL.md` for the full protocol.
 
-**Version:** Record the module, date, commit hash and tested settings at the freeze, before counted trials. **Status:** Prepared conditions, not collected data.
+**Version:** v0.4 (frozen baseline). Record the module, date, commit hash and tested settings at the freeze, before counted trials. **Status:** Prepared conditions, not collected data.
 
 ## Conditions
 
@@ -48,7 +48,7 @@ Kept only as raw material for the cards. They were written for an earlier plan w
 
 ## Short procedure
 
-1. Get consent for participation and, separately, for webcam and microphone processing; assign an anonymous participant ID. Do dry runs first (see **Capture AU**) and exclude them from the counts.
+1. Get consent for participation and, separately, for webcam and microphone processing; assign an anonymous participant ID. Dry runs (done with **Capture AU**, now commented out) are excluded from the counts.
 2. Give the participant the task card for the trial without telling them the expected trigger decision. Write down the condition and `Should fire?` before the run.
 3. Press **Start trial**; the participant performs the card. Read the module's decision.
 4. Record the row in the **Team 3.2** trial-log tab: ID, date and time, version, participant, condition, `Should fire?`, `Fired?`, outcome and notes. Log failures too; an invalid performance is its own row (see the protocol).

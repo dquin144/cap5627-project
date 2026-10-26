@@ -6,11 +6,11 @@
  * The facial reading and the spoken words are passed to evaluateCheckIn(); only when BOTH show
  * a cue does the agent speak a check-in.
  *
- * Buttons: "Start trial", which runs one trial, and "Capture AU (dry run)", a dry-run-only
- * tool that is not part of the frozen baseline (see the DRY-RUN TOOL block). This is the
- * baseline on eEVA with OpenFace 3.0: an experimenter presses Start trial and annotates each
- * result by hand, so the module only needs to answer "did the cues fire the check-in?". The
- * participant is a teammate or classmate, and no video or audio is kept.
+ * Button: "Start trial", which runs one trial. The dry-run "Capture AU" tool used to set the
+ * threshold is commented out now that the baseline is frozen (see the DRY-RUN TOOL block).
+ * This is the baseline on eEVA with OpenFace 3.0: an experimenter presses Start trial and
+ * annotates each result by hand, so the module only needs to answer "did the cues fire the
+ * check-in?". The participant is a teammate or classmate, and no video or audio is kept.
  *
  * On start it also checks that the platform functions it needs exist and that the chosen
  * strategy is accepted, and reports any problem on screen and in the console.
@@ -28,6 +28,11 @@ const config = require("./config.json");
 // evaluateCheckIn(...) applies the rule: facial cue AND verbal cue.
 // trigger.js is the single copy of the decision logic.
 const { CONFIG, evaluateCheckIn } = require("./trigger.js");
+
+// Version of the frozen baseline. Shown at startup and written with every trial decision so
+// each logged trial can be matched to its build. Any change after the freeze (code, threshold,
+// window, keywords) needs a new version here and a restart of the counted trials.
+const VERSION = "v0.4";
 
 // ---------------------------------------------------------------
 // Shared state. Declared at module level so stop() can release it.
@@ -51,7 +56,7 @@ let stopped = false;
 
 // Longest time a trial listens for the participant's line, in milliseconds. A trial's peak
 // AU window runs from Start trial until the speech ends (1.2 s of silence), and never longer
-// than this. The Capture AU dry-run tool uses it as its capture window.
+// than this. The Capture AU dry-run tool (now commented out) used it as its capture window.
 const LISTEN_MAX_WAIT_MS = 8000;
 
 // Number of recognizer callbacks received during the current listen.
@@ -62,7 +67,7 @@ let onInterim = null;
 
 // Optional callback that receives the analyzer's raw AU result for every frame the analysis
 // loop reads while listening is on. Only the dry-run Capture AU tool sets it (to list every
-// AU the analyzer returns); it stays null otherwise.
+// AU the analyzer returns). That tool is commented out at the baseline freeze, so it stays null.
 let onAuFrame = null;
 
 // ---------------------------------------------------------------
@@ -135,6 +140,7 @@ module.exports.run = async function run(context) {
   stopped = false;
 
   // Startup diagnostics: lists what this project actually exposes.
+  console.log("Context-Aware Empathic Check-In " + VERSION);
   console.log("project helpers:", Object.keys(context.helpers?.project || {}));
   console.log("helpers:", Object.keys(context.helpers || {}));
   console.log("context:", Object.keys(context));
@@ -174,7 +180,8 @@ module.exports.run = async function run(context) {
   // Stays disabled until the camera and recognizer are ready.
   const listenButton = document.createElement("button");
   listenButton.type = "button";
-  listenButton.textContent = "Start trial (listen + read face)";
+  // Original: listenButton.textContent = "Start trial (listen + read face)";
+  listenButton.textContent = "Start trial";
   listenButton.disabled = true;
 
   // One line of text showing the current step, what was heard, and the decision.
@@ -196,11 +203,13 @@ module.exports.run = async function run(context) {
   // True while the microphone is open and AU readings should count toward the peak.
   let listening = false;
 
-  // True while a trial or a Capture AU run is in progress. Blocks overlapping clicks.
+  // True while a trial (or, when the dry-run tool is restored, a Capture AU run) is in
+  // progress. Blocks overlapping clicks.
   let busy = false;
 
   // Switches the dry-run Capture AU button on or off. It does nothing unless the dry-run tool
-  // block below is active, so the trial code can call it whether or not that block exists.
+  // block below is active (it is commented out at the baseline freeze), so the trial code can
+  // call it whether or not that block exists.
   let setDryRunEnabled = () => {};
 
   panel.append(prompt, statusLine, camHost, listenButton);
@@ -405,6 +414,7 @@ module.exports.run = async function run(context) {
               peak[id] = Math.max(peak[id], latest[id]);
             });
             // Dry-run hook: hands Capture AU the raw result so it can list every AU returned.
+            // Inert at the baseline freeze (onAuFrame stays null).
             onAuFrame?.(result.aus);
           }
         }
@@ -480,7 +490,8 @@ module.exports.run = async function run(context) {
     if (busy || stopped) return;
     busy = true;
     listenButton.disabled = true;
-    // Capture AU stays off from the start of the trial until the dialogue has finished.
+    // Capture AU stays off from the start of the trial until the dialogue has finished
+    // (no effect while the dry-run tool is commented out).
     setDryRunEnabled(false);
     try {
       // If setup failed earlier, start the camera and microphone now.
@@ -502,7 +513,7 @@ module.exports.run = async function run(context) {
             ? "No speech events received from the recognizer. Check the mic (see console) and retry."
             : "Speech was heard but no usable transcript. Click Start trial to retry."
         );
-        metrics.record("trigger_decision", "no_speech", peakDetail());
+        metrics.record("trigger_decision", "no_speech", "version=" + VERSION + ";" + peakDetail());
         return;
       }
 
@@ -521,7 +532,8 @@ module.exports.run = async function run(context) {
       metrics.record(
         "trigger_decision",
         result.shouldTrigger ? "check_in" : "no_check_in",
-        "facial=" + result.facialCue +
+        "version=" + VERSION +
+          ";facial=" + result.facialCue +
           ";verbal=" + result.verbalCue +
           ";" + peakDetail() +
           ";threshold=" + CONFIG.auThreshold +
@@ -549,167 +561,172 @@ module.exports.run = async function run(context) {
   });
 
   // ===== DRY-RUN TOOL START =====
-  // Dry runs only. NOT part of the frozen baseline; kept for later OpenFace 3.0 dry runs.
-  // At the freeze, comment out this whole block (the button creation included). The
-  // setDryRunEnabled() calls and the onAuFrame hook outside it then stay inert.
+  // Commented out at the baseline freeze: the dry runs are finished and Capture AU is not part
+  // of the baseline. Kept, not deleted, so it can be restored for later dry runs by removing
+  // one "// " from each line. While it is commented out, the setDryRunEnabled() calls and the
+  // onAuFrame hook outside it stay inert.
   //
-  // Capture AU shows every AU the analyzer returns for the current face, with the peak and the
-  // mean of each over the capture window, so the team can see which AUs exist at all (for
-  // example whether the watched AU4 is returned), check the AU scale, set the threshold,
-  // and decide whether a per-user neutral calibration is needed. It listens to no speech,
-  // speaks nothing and never checks in. Its numbers are never trial data and are not written
-  // to the metrics log.
-
-  // Length of the capture: the longest window a trial can use for its peak.
-  const captureWindowMs = LISTEN_MAX_WAIT_MS;
-
-  const captureButton = document.createElement("button");
-  captureButton.type = "button";
-  captureButton.textContent = "Capture AU (dry run)";
-  captureButton.disabled = true;
-  panel.append(captureButton);
-
-  setDryRunEnabled = (enabled) => { captureButton.disabled = !enabled; };
-
-  captureButton.addEventListener("click", async () => {
-    if (busy || stopped) return;
-    busy = true;
-    // Capture AU and Start trial never run at the same time.
-    captureButton.disabled = true;
-    listenButton.disabled = true;
-    try {
-      // If setup failed earlier, start the camera now, as Start trial does.
-      if (!sensorsOn) {
-        setStatus("Restarting camera and microphone...");
-        if (!(await startSensors())) return;
-      }
-
-      // Same face reading as a trial: while `listening` is true the analysis loop reads the
-      // camera. The hook below also records every AU the analyzer returns, under the label
-      // the analyzer uses (for example "AU04" or "4L"): the highest value, and the total for
-      // the mean.
-      resetPeak();
-      const peaks = {};
-      const sums = {};
-      let samples = 0;
-      // Show line breaks in the status text (one AU per line).
-      statusLine.style.whiteSpace = "pre-line";
-      onAuFrame = (rawAus) => {
-        samples++;
-        // The first raw result is printed once, so its real shape can be inspected.
-        if (samples === 1) console.log("[dry_run_capture] raw analyzer result (first frame):", rawAus);
-        // One value per AU in this frame, on the 0-100 scale the trial uses. The analyzer
-        // can report the same AU under two labels ("AU1" on a 0-1 scale and "AU01" on 0-100),
-        // so labels are reduced to one name per AU first: "AU04" and "AU4" both become "AU4",
-        // and an L/R side letter is kept ("4L" -> "AU4L").
-        const nameOf = (label) => {
-          const m = String(label).match(/(\d+)([LR])?/i);
-          return m ? "AU" + parseInt(m[1], 10) + (m[2] ? m[2].toUpperCase() : "") : String(label);
-        };
-        // getTopAUs gives the values the trial reads (0-100). It leaves out AUs it considers
-        // not detected.
-        const trialValues = {};
-        (helpers.biofeedback.getTopAUs(rawAus, 100) || []).forEach((item) => {
-          const v = Number(item.intensity);
-          if (Number.isFinite(v)) {
-            const name = nameOf(item.au);
-            trialValues[name] = Math.max(trialValues[name] ?? -Infinity, v);
-          }
-        });
-        // The raw result is read as well (a list of {au, intensity} items, or an object of
-        // label -> number) so AUs that getTopAUs left out still appear, at their raw value.
-        const rawValues = {};
-        const keepRaw = (label, value) => {
-          const v = Number(value);
-          if (!label || !Number.isFinite(v)) return;
-          const name = nameOf(label);
-          rawValues[name] = Math.max(rawValues[name] ?? -Infinity, v);
-        };
-        if (Array.isArray(rawAus)) {
-          rawAus.forEach((item) => {
-            keepRaw(String(item?.au ?? item?.name ?? item?.id ?? item?.label ?? ""),
-                    item?.intensity ?? item?.value ?? item?.score);
-          });
-        } else if (rawAus && typeof rawAus === "object") {
-          Object.entries(rawAus).forEach(([label, value]) => keepRaw(label, value));
-        }
-        // The trial's value wins. An AU only in the raw result is shown at its raw value
-        // (normally 0, so the scale does not matter).
-        const names = new Set([...Object.keys(trialValues), ...Object.keys(rawValues)]);
-        names.forEach((name) => {
-          const value = trialValues[name] ?? rawValues[name];
-          peaks[name] = Math.max(peaks[name] ?? -Infinity, value);
-          sums[name] = (sums[name] ?? 0) + value;
-        });
-      };
-
-      setStatus("Capture AU: hold the face for " + (captureWindowMs / 1000) + " s...");
-      listening = true;
-      await helpers.wait(captureWindowMs);
-      listening = false;
-      onAuFrame = null;
-      if (stopped) return;
-
-      // Show the result on the status line (and in the console).
-      // Short numbers: 1 decimal from 10 up, 2 decimals below (so 0-1 scales stay readable).
-      const fmt = (n) => Number(n.toFixed(n >= 10 ? 1 : 2));
-      // The plain AU number in a label: "AU04" -> "4", "4L" -> "4".
-      const idOf = (label) => String(parseInt(label.replace(/\D/g, ""), 10));
-      const shown = (label) => (/^au/i.test(label) ? label : "AU" + label);
-      const labels = Object.keys(peaks).sort(
-        (a, b) => (idOf(a) - idOf(b)) || a.localeCompare(b)
-      );
-      // Peak and mean (over all samples) of every AU returned. * marks a watched AU (AU4)
-      // whose peak is at or above the threshold.
-      const rows = labels.map((label) => ({
-        label,
-        peak: fmt(peaks[label]),
-        avg: fmt(sums[label] / samples),
-        atOrAboveThreshold:
-          CONFIG.facialAUs.includes(idOf(label)) && peaks[label] >= CONFIG.auThreshold
-      }));
-      // Watched AUs the analyzer never returned (the reason AU7 is no longer watched: OpenFace
-      // 3.0 does not return it).
-      const returnedIds = new Set(labels.map(idOf));
-      const notReturned = CONFIG.facialAUs.filter((id) => !returnedIds.has(id));
-      // One line of header, then one AU per line: "AU4: 61 Peak, 20 Avg".
-      setStatus(
-        "Capture AU: " + captureWindowMs + " ms | " + analyzerEngine +
-        " | threshold " + CONFIG.auThreshold + " | " + samples + " samples" +
-        (samples === 0
-          ? "\nNo AU readings received (check the camera and analyzer)."
-          : (rows.length
-              ? "\n" + rows.map((r) =>
-                  shown(r.label) + ": " + r.peak + " Peak, " + r.avg + " Avg" +
-                  (r.atOrAboveThreshold ? "*" : "")
-                ).join("\n") + "\n(* at or above threshold)"
-              : "\nNo AUs returned.") +
-            (notReturned.length
-              ? "\nNot returned: " + notReturned.map((id) => "AU" + id).join(", ")
-              : ""))
-      );
-      console.log("[dry_run_capture]", {
-        windowMs: captureWindowMs,
-        engine: analyzerEngine,
-        threshold: CONFIG.auThreshold,
-        samples,
-        rows,
-        notReturned
-      });
-    } catch (err) {
-      console.error("Capture AU failed:", err);
-      setStatus("Capture AU error: " + (err && err.message ? err.message : err));
-    } finally {
-      listening = false;
-      onAuFrame = null;
-      busy = false;
-      // Feedback is shown (or the capture failed): enable all buttons.
-      if (!stopped) {
-        listenButton.disabled = false;
-        captureButton.disabled = false;
-      }
-    }
-  });
+  // // Dry runs only. NOT part of the frozen baseline; kept for later OpenFace 3.0 dry runs.
+  // // At the freeze, comment out this whole block (the button creation included). The
+  // // setDryRunEnabled() calls and the onAuFrame hook outside it then stay inert.
+  // //
+  // // Capture AU shows every AU the analyzer returns for the current face, with the peak and the
+  // // mean of each over the capture window, so the team can see which AUs exist at all (for
+  // // example whether the watched AU4 is returned), check the AU scale, set the threshold,
+  // // and decide whether a per-user neutral calibration is needed. It listens to no speech,
+  // // speaks nothing and never checks in. Its numbers are never trial data and are not written
+  // // to the metrics log.
+  //
+  // // Length of the capture: the longest window a trial can use for its peak.
+  // const captureWindowMs = LISTEN_MAX_WAIT_MS;
+  //
+  // const captureButton = document.createElement("button");
+  // captureButton.type = "button";
+  // captureButton.textContent = "Capture AU (dry run)";
+  // captureButton.disabled = true;
+  // panel.append(captureButton);
+  //
+  // setDryRunEnabled = (enabled) => { captureButton.disabled = !enabled; };
+  //
+  // captureButton.addEventListener("click", async () => {
+    // if (busy || stopped) return;
+    // busy = true;
+    // // Capture AU and Start trial never run at the same time.
+    // captureButton.disabled = true;
+    // listenButton.disabled = true;
+    // try {
+      // // If setup failed earlier, start the camera now, as Start trial does.
+      // if (!sensorsOn) {
+        // setStatus("Restarting camera and microphone...");
+        // if (!(await startSensors())) return;
+      // }
+  //
+      // // Same face reading as a trial: while `listening` is true the analysis loop reads the
+      // // camera. The hook below also records every AU the analyzer returns, under the label
+      // // the analyzer uses (for example "AU04" or "4L"): the highest value, and the total for
+      // // the mean.
+      // resetPeak();
+      // const peaks = {};
+      // const sums = {};
+      // let samples = 0;
+      // // Show line breaks in the status text (one AU per line).
+      // statusLine.style.whiteSpace = "pre-line";
+      // onAuFrame = (rawAus) => {
+        // samples++;
+        // // The first raw result is printed once, so its real shape can be inspected.
+        // if (samples === 1) console.log("[dry_run_capture] raw analyzer result (first frame):", rawAus);
+        // // One value per AU in this frame, on the 0-100 scale the trial uses. The analyzer
+        // // can report the same AU under two labels ("AU1" on a 0-1 scale and "AU01" on 0-100),
+        // // so labels are reduced to one name per AU first: "AU04" and "AU4" both become "AU4",
+        // // and an L/R side letter is kept ("4L" -> "AU4L").
+        // const nameOf = (label) => {
+          // const m = String(label).match(/(\d+)([LR])?/i);
+          // return m ? "AU" + parseInt(m[1], 10) + (m[2] ? m[2].toUpperCase() : "") : String(label);
+        // };
+        // // getTopAUs gives the values the trial reads (0-100). It leaves out AUs it considers
+        // // not detected.
+        // const trialValues = {};
+        // (helpers.biofeedback.getTopAUs(rawAus, 100) || []).forEach((item) => {
+          // const v = Number(item.intensity);
+          // if (Number.isFinite(v)) {
+            // const name = nameOf(item.au);
+            // trialValues[name] = Math.max(trialValues[name] ?? -Infinity, v);
+          // }
+        // });
+        // // The raw result is read as well (a list of {au, intensity} items, or an object of
+        // // label -> number) so AUs that getTopAUs left out still appear, at their raw value.
+        // const rawValues = {};
+        // const keepRaw = (label, value) => {
+          // const v = Number(value);
+          // if (!label || !Number.isFinite(v)) return;
+          // const name = nameOf(label);
+          // rawValues[name] = Math.max(rawValues[name] ?? -Infinity, v);
+        // };
+        // if (Array.isArray(rawAus)) {
+          // rawAus.forEach((item) => {
+            // keepRaw(String(item?.au ?? item?.name ?? item?.id ?? item?.label ?? ""),
+                    // item?.intensity ?? item?.value ?? item?.score);
+          // });
+        // } else if (rawAus && typeof rawAus === "object") {
+          // Object.entries(rawAus).forEach(([label, value]) => keepRaw(label, value));
+        // }
+        // // The trial's value wins. An AU only in the raw result is shown at its raw value
+        // // (normally 0, so the scale does not matter).
+        // const names = new Set([...Object.keys(trialValues), ...Object.keys(rawValues)]);
+        // names.forEach((name) => {
+          // const value = trialValues[name] ?? rawValues[name];
+          // peaks[name] = Math.max(peaks[name] ?? -Infinity, value);
+          // sums[name] = (sums[name] ?? 0) + value;
+        // });
+      // };
+  //
+      // setStatus("Capture AU: hold the face for " + (captureWindowMs / 1000) + " s...");
+      // listening = true;
+      // await helpers.wait(captureWindowMs);
+      // listening = false;
+      // onAuFrame = null;
+      // if (stopped) return;
+  //
+      // // Show the result on the status line (and in the console).
+      // // Short numbers: 1 decimal from 10 up, 2 decimals below (so 0-1 scales stay readable).
+      // const fmt = (n) => Number(n.toFixed(n >= 10 ? 1 : 2));
+      // // The plain AU number in a label: "AU04" -> "4", "4L" -> "4".
+      // const idOf = (label) => String(parseInt(label.replace(/\D/g, ""), 10));
+      // const shown = (label) => (/^au/i.test(label) ? label : "AU" + label);
+      // const labels = Object.keys(peaks).sort(
+        // (a, b) => (idOf(a) - idOf(b)) || a.localeCompare(b)
+      // );
+      // // Peak and mean (over all samples) of every AU returned. * marks a watched AU (AU4)
+      // // whose peak is at or above the threshold.
+      // const rows = labels.map((label) => ({
+        // label,
+        // peak: fmt(peaks[label]),
+        // avg: fmt(sums[label] / samples),
+        // atOrAboveThreshold:
+          // CONFIG.facialAUs.includes(idOf(label)) && peaks[label] >= CONFIG.auThreshold
+      // }));
+      // // Watched AUs the analyzer never returned (the reason AU7 is no longer watched: OpenFace
+      // // 3.0 does not return it).
+      // const returnedIds = new Set(labels.map(idOf));
+      // const notReturned = CONFIG.facialAUs.filter((id) => !returnedIds.has(id));
+      // // One line of header, then one AU per line: "AU4: 61 Peak, 20 Avg".
+      // setStatus(
+        // "Capture AU: " + captureWindowMs + " ms | " + analyzerEngine +
+        // " | threshold " + CONFIG.auThreshold + " | " + samples + " samples" +
+        // (samples === 0
+          // ? "\nNo AU readings received (check the camera and analyzer)."
+          // : (rows.length
+              // ? "\n" + rows.map((r) =>
+                  // shown(r.label) + ": " + r.peak + " Peak, " + r.avg + " Avg" +
+                  // (r.atOrAboveThreshold ? "*" : "")
+                // ).join("\n") + "\n(* at or above threshold)"
+              // : "\nNo AUs returned.") +
+            // (notReturned.length
+              // ? "\nNot returned: " + notReturned.map((id) => "AU" + id).join(", ")
+              // : ""))
+      // );
+      // console.log("[dry_run_capture]", {
+        // windowMs: captureWindowMs,
+        // engine: analyzerEngine,
+        // threshold: CONFIG.auThreshold,
+        // samples,
+        // rows,
+        // notReturned
+      // });
+    // } catch (err) {
+      // console.error("Capture AU failed:", err);
+      // setStatus("Capture AU error: " + (err && err.message ? err.message : err));
+    // } finally {
+      // listening = false;
+      // onAuFrame = null;
+      // busy = false;
+      // // Feedback is shown (or the capture failed): enable all buttons.
+      // if (!stopped) {
+        // listenButton.disabled = false;
+        // captureButton.disabled = false;
+      // }
+    // }
+  // });
   // ===== DRY-RUN TOOL END =====
 
   // ---------------------------------------------------------------
@@ -719,7 +736,7 @@ module.exports.run = async function run(context) {
     if (await startSensors()) {
       listenButton.disabled = false;
       setDryRunEnabled(true);
-      setStatus("Ready. Click Start trial, then have the participant say the line.");
+      setStatus("Ready (" + VERSION + "). Click Start trial, then have the participant say the line.");
     }
   } catch (err) {
     console.error("Webcam/recognizer setup failed:", err);
