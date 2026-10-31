@@ -59,8 +59,15 @@ let stopped = false;
 // than this. The Capture AU dry-run tool (now commented out) used it as its capture window.
 const LISTEN_MAX_WAIT_MS = 8000;
 
+// Silence after the last speech, in milliseconds, that ends a trial's listen.
+const LISTEN_SILENCE_MS = 1200;
+
 // Number of recognizer callbacks received during the current listen.
 let speechEvents = 0;
+
+// How the last listenOnce() ended: "silence" (silence after speech) or "time_limit" (the
+// maximum wait ran out). Null before any listen and when Stop ended it.
+let listenEndReason = null;
 
 // Optional callback that receives each partial transcript so it can be shown on screen.
 let onInterim = null;
@@ -77,12 +84,20 @@ let onAuFrame = null;
 // Returns the final transcript, or "" if nothing was said.
 // ---------------------------------------------------------------
 // Original: function listenOnce(silenceMs = 1200, maxWaitMs = 8000) {
-function listenOnce(silenceMs = 1200, maxWaitMs = LISTEN_MAX_WAIT_MS) {
+function listenOnce(silenceMs = LISTEN_SILENCE_MS, maxWaitMs = LISTEN_MAX_WAIT_MS) {
   return new Promise((resolve) => {
     // Most recent transcript from the recognizer. It is refined as the person keeps talking.
     let latest = "";
     // Guards against resolving twice when silence and the maximum wait expire together.
     let finished = false;
+    listenEndReason = null;
+
+    // Ends the listen and records why: "silence", "time_limit", or null when Stop ended it.
+    const end = (reason) => () => {
+      if (finished) return;
+      listenEndReason = reason;
+      finishListening();
+    };
 
     finishListening = () => {
       if (finished) return;
@@ -100,11 +115,12 @@ function listenOnce(silenceMs = 1200, maxWaitMs = LISTEN_MAX_WAIT_MS) {
       onInterim?.(latest);
       // New speech arrived, so restart the silence countdown.
       window.clearTimeout(silenceTimer);
-      silenceTimer = window.setTimeout(finishListening, silenceMs);
+      silenceTimer = window.setTimeout(end("silence"), silenceMs);
     });
 
-    // If no speech arrives at all, stop after maxWaitMs and resolve with "".
-    listenLimitTimer = window.setTimeout(finishListening, maxWaitMs);
+    // Stops after maxWaitMs even if the person is still talking; resolves with "" if no
+    // speech arrived at all.
+    listenLimitTimer = window.setTimeout(end("time_limit"), maxWaitMs);
   });
 }
 
@@ -349,6 +365,92 @@ module.exports.run = async function run(context) {
     return out;
   }
 
+  // Short numbers: 1 decimal from 10 up, 2 decimals below (so 0-1 scales stay readable).
+  const fmt = (n) => Number(n.toFixed(n >= 10 ? 1 : 2));
+  // The plain AU number in a label: "AU04" -> "4", "4L" -> "4".
+  const idOf = (label) => String(parseInt(label.replace(/\D/g, ""), 10));
+
+  // ---------------------------------------------------------------
+  // createAuRecorder: collects every AU the analyzer returns, frame by frame, and reports the
+  // peak and mean of each. A trial's report and the dry-run Capture AU tool both use it. Hand
+  // onFrame to onAuFrame; summary() can be read at any time.
+  // ---------------------------------------------------------------
+  function createAuRecorder() {
+    const peaks = {};
+    const sums = {};
+    let samples = 0;
+
+    // "AU04", "AU4" and "4" all become "AU4"; an L/R side letter is kept ("4L" -> "AU4L").
+    const nameOf = (label) => {
+      const m = String(label).match(/(\d+)([LR])?/i);
+      return m ? "AU" + parseInt(m[1], 10) + (m[2] ? m[2].toUpperCase() : "") : String(label);
+    };
+
+    function onFrame(rawAus) {
+      samples++;
+      // The first raw result is printed once, so its real shape can be inspected.
+      if (samples === 1) console.log("[au_capture] raw analyzer result (first frame):", rawAus);
+      // One value per AU in this frame, on the 0-100 scale the trial uses. The analyzer can
+      // report the same AU under two labels ("AU1" on a 0-1 scale and "AU01" on 0-100), so
+      // labels are reduced to one name per AU first. getTopAUs gives the values the trial
+      // reads (0-100); it leaves out AUs it considers not detected.
+      const trialValues = {};
+      (helpers.biofeedback.getTopAUs(rawAus, 100) || []).forEach((item) => {
+        const v = Number(item.intensity);
+        if (Number.isFinite(v)) {
+          const name = nameOf(item.au);
+          trialValues[name] = Math.max(trialValues[name] ?? -Infinity, v);
+        }
+      });
+      // The raw result is read as well (a list of {au, intensity} items, or an object of
+      // label -> number) so AUs that getTopAUs left out still appear, at their raw value.
+      const rawValues = {};
+      const keepRaw = (label, value) => {
+        const v = Number(value);
+        if (!label || !Number.isFinite(v)) return;
+        const name = nameOf(label);
+        rawValues[name] = Math.max(rawValues[name] ?? -Infinity, v);
+      };
+      if (Array.isArray(rawAus)) {
+        rawAus.forEach((item) => {
+          keepRaw(String(item?.au ?? item?.name ?? item?.id ?? item?.label ?? ""),
+                  item?.intensity ?? item?.value ?? item?.score);
+        });
+      } else if (rawAus && typeof rawAus === "object") {
+        Object.entries(rawAus).forEach(([label, value]) => keepRaw(label, value));
+      }
+      // The trial's value wins. An AU only in the raw result is shown at its raw value
+      // (normally 0, so the scale does not matter).
+      const names = new Set([...Object.keys(trialValues), ...Object.keys(rawValues)]);
+      names.forEach((name) => {
+        const value = trialValues[name] ?? rawValues[name];
+        peaks[name] = Math.max(peaks[name] ?? -Infinity, value);
+        sums[name] = (sums[name] ?? 0) + value;
+      });
+    }
+
+    // Number of analyzer frames recorded and one row per AU (sorted by AU number): its peak and
+    // its mean over all frames. atOrAboveThreshold is true for a watched AU (AU4) whose peak
+    // reached the threshold.
+    function summary() {
+      const labels = Object.keys(peaks).sort(
+        (a, b) => (idOf(a) - idOf(b)) || a.localeCompare(b)
+      );
+      return {
+        samples,
+        rows: labels.map((label) => ({
+          label,
+          peak: fmt(peaks[label]),
+          avg: fmt(sums[label] / samples),
+          atOrAboveThreshold:
+            CONFIG.facialAUs.includes(idOf(label)) && peaks[label] >= CONFIG.auThreshold
+        }))
+      };
+    }
+
+    return { onFrame, summary };
+  }
+
   // Analyzer name: the platform setting if present, then config.json, then "openface3", the
   // baseline's analyzer.
   // Original last fallback: "pyfeat".
@@ -484,6 +586,54 @@ module.exports.run = async function run(context) {
   }
 
   // ---------------------------------------------------------------
+  // showTrialReport: the structured result of one trial. Shows it as multi-line text in the
+  // panel and logs the same data as an object in the console. The values are display and
+  // annotation aids only; the decision itself was already made by evaluateCheckIn().
+  // ---------------------------------------------------------------
+  function showTrialReport(r) {
+    const yesNo = (v) => (v ? "true" : "false");
+    const endText = r.endReason === "silence"
+      ? "silence after speech (" + LISTEN_SILENCE_MS + " ms)"
+      : "time limit reached (" + LISTEN_MAX_WAIT_MS + " ms)";
+    const lines = [
+      "TRIAL REPORT",
+      "Transcript: " + (r.transcript ? "\"" + r.transcript + "\"" : "(none)"),
+      ...(r.note ? ["Note: " + r.note] : []),
+      "Capture window: " + r.windowMs + " ms (limit " + LISTEN_MAX_WAIT_MS + " ms)",
+      "Window ended by: " + endText,
+      "Analyzer: " + r.analyzer + " | samples: " + r.samples,
+      "AU values (0-100):",
+      ...(r.rows.length
+        ? r.rows.map((row) =>
+            "  " + row.label + ": " + row.peak + " Peak, " + row.avg + " Avg" +
+            (row.atOrAboveThreshold ? " *" : ""))
+        : ["  (no AU readings received; check the camera and analyzer)"]),
+      "AU4 threshold: " + r.threshold + " | AU4 peak used: " + r.au4Peak.toFixed(1),
+      "Facial cue: " + yesNo(r.facialCue),
+      "Matched phrases: " + (r.matchedPhrases.join(", ") || "none"),
+      "Verbal cue: " + yesNo(r.verbalCue),
+      "Decision: " + (r.shouldTrigger ? "CHECK IN" : "DO NOT CHECK IN")
+    ];
+    // Show line breaks in the status text (one item per line).
+    statusLine.style.whiteSpace = "pre-line";
+    setStatus(lines.join("\n"));
+    console.log("[trial_report]", {
+      transcript: r.transcript,
+      aus: r.rows.map(({ label, peak: p, avg }) => ({ au: label, peak: p, avg })),
+      sampleSize: r.samples,
+      windowMs: r.windowMs,
+      windowLimitMs: LISTEN_MAX_WAIT_MS,
+      au4Threshold: r.threshold,
+      au4Peak: r.au4Peak,
+      facialCue: r.facialCue,
+      matchedPhrases: r.matchedPhrases,
+      verbalCue: r.verbalCue,
+      windowEnd: r.endReason,
+      shouldTrigger: r.shouldTrigger
+    });
+  }
+
+  // ---------------------------------------------------------------
   // One trial: listen to the line while tracking the peak AU4, decide, then maybe check in.
   // ---------------------------------------------------------------
   listenButton.addEventListener("click", async () => {
@@ -500,33 +650,52 @@ module.exports.run = async function run(context) {
         if (!(await startSensors())) return;
       }
       resetPeak();
+      // Records every AU the analyzer returns during the capture window, for the trial report.
+      const auRecorder = createAuRecorder();
+      onAuFrame = auRecorder.onFrame;
+      listenEndReason = null;
+      const windowStart = performance.now();
       listening = true;
       setStatus("Listening... say the line now.");
       const transcript = await captureLine();
       listening = false;
+      onAuFrame = null;
+      // Late partial transcripts must not overwrite the report.
+      onInterim = null;
+      const windowMs = Math.round(performance.now() - windowStart);
       if (stopped) return;
-
-      // Nothing usable was heard: report why and log it, but do not evaluate.
-      if (!transcript) {
-        setStatus(
-          speechEvents === 0
-            ? "No speech events received from the recognizer. Check the mic (see console) and retry."
-            : "Speech was heard but no usable transcript. Click Start trial to retry."
-        );
-        metrics.record("trigger_decision", "no_speech", "version=" + VERSION + ";" + peakDetail());
-        return;
-      }
 
       // Apply the rule. The facial cue is the peak AU intensity during the listen, compared
       // with the threshold in CONFIG; the verbal cue is a phrase match on the transcript.
+      // An empty transcript has no verbal cue, so it never triggers a check-in.
       const result = evaluateCheckIn({ aus: peak, transcript });
 
-      setStatus(
-        "Heard: \"" + transcript + "\" | " +
-        CONFIG.facialAUs.map((id) => "AU" + id + " peak " + peak[id].toFixed(1)).join(", ") +
-        " | Facial: " + result.facialCue + ", Verbal: " + result.verbalCue +
-        " -> " + (result.shouldTrigger ? "CHECK IN" : "DO NOT CHECK IN")
-      );
+      // Shown on screen and in the console after every trial, including one with no speech.
+      showTrialReport({
+        transcript,
+        windowMs,
+        // Nothing usable was heard: say why, so the experimenter knows whether to retry.
+        note: transcript
+          ? ""
+          : (speechEvents === 0
+              ? "No speech events received from the recognizer. Check the mic (see console) and retry."
+              : "Speech was heard but no usable transcript. Click Start trial to retry."),
+        endReason: listenEndReason ?? "time_limit",
+        analyzer: analyzerEngine,
+        ...auRecorder.summary(),
+        threshold: CONFIG.auThreshold,
+        au4Peak: peak["4"],
+        facialCue: result.facialCue,
+        matchedPhrases: result.matchedPhrases,
+        verbalCue: result.verbalCue,
+        shouldTrigger: result.shouldTrigger
+      });
+
+      // Nothing usable was heard: log it, but do not check in.
+      if (!transcript) {
+        metrics.record("trigger_decision", "no_speech", "version=" + VERSION + ";" + peakDetail());
+        return;
+      }
 
       // Log the decision with its inputs. The spoken sentence itself is not logged.
       metrics.record(
@@ -552,6 +721,7 @@ module.exports.run = async function run(context) {
       // Runs after a check-in finished speaking, after a "do not check in" decision was
       // shown, and after any error, so the buttons always come back.
       listening = false;
+      onAuFrame = null;
       busy = false;
       if (!stopped) {
         listenButton.disabled = false;
