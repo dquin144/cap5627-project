@@ -56,19 +56,43 @@ Done by the team, in this order: dry runs → decide the threshold and whether a
 
 ## eEVA module (`main.js`)
 
-Flow: start camera (`helpers.webcam.start`) and recognizer (`AudioToText`) → chained `helpers.biofeedback.analyzeVideo` loop tracks the **peak** AU4 → experimenter clicks **Start trial** → `listenOnce()` captures the line → `evaluateCheckIn({aus: peak, transcript})` → if it fires, the strategy's utterance is spoken (`createCheckInStrategy` + `context.agent.speak`).
-- `metrics` logs the version (`v0.4`), the decision, cue flags, matched phrases, the peak of each watched AU (AU4) and the threshold. The raw sentence is not logged.
-- **Peak window.** A trial's peak runs from Start trial until the speech ends (1.2 s of silence), and never longer than `LISTEN_MAX_WAIT_MS` (8000 ms).
+Flow: start camera (`helpers.webcam.start`) and recognizer (`AudioToText`) → chained `helpers.biofeedback.analyzeVideo` loop tracks the **peak** AU4 → experimenter clicks **Start trial** → `listenOnce()` captures the line → `evaluateCheckIn({aus: peak, transcript})` → the [trial report](#trial-report) is shown → if it fires, the strategy's utterance is spoken (`createCheckInStrategy` + `context.agent.speak`).
+- `metrics` logs the version (`v0.4`), the decision, cue flags, matched phrases, the peak of each watched AU (AU4) and the threshold. The raw sentence is not logged there (the trial report shows it on screen and in the console only).
+- **Peak window.** A trial's peak runs from Start trial until the speech ends (`LISTEN_SILENCE_MS`, 1.2 s of silence), and never longer than `LISTEN_MAX_WAIT_MS` (8000 ms).
 - **Strategy check.** The check that a strategy is usable (`createStrategy()` in `main.js`) requires only `getUtterance`, the method that produces the check-in sentence.
 - **Buttons.**
-  - **Start trial** is the official baseline button and runs one trial. It stays disabled from the start of the trial until the dialogue has finished: after the agent finishes speaking if the check-in fired, or when the decision is displayed if it did not. It is always re-enabled, including after an error. (Its earlier label was "Start trial (listen + read face)", kept as a comment in `main.js`.)
+  - **Start trial** is the official baseline button and runs one trial, ending by showing the [trial report](#trial-report). It stays disabled from the start of the trial until the dialogue has finished: after the agent finishes speaking if the check-in fired, or when the decision is displayed if it did not. It is always re-enabled, including after an error. (Its earlier label was "Start trial (listen + read face)", kept as a comment in `main.js`.)
   - **Capture AU (dry run)** is **commented out** now that the dry runs are finished; it is not part of the frozen baseline. The description below is kept for when it is restored. While it was active, Start trial also disabled it during a trial. It collects AU readings for one capture window (the same 8000 ms as the longest trial window), using the trial's own peak tracking, with no speech recognition, no agent speech and no check-in. It displays **every AU the analyzer returns**, each with its peak and mean over the window, one AU per line, for example `AU4: 61 Peak, 20 Avg`, under a header line with the window, the analyzer name, the threshold and the sample count. It shows one row per AU on the 0–100 scale the trial uses (values from `getTopAUs`; labels such as `AU1` and `AU01` are merged into one), and also reads the analyzer's raw result so AUs that `getTopAUs` leaves out still appear. It logs the first raw result to the console so its real shape can be inspected. OpenFace 3.0 returns only AU1, 2, 4, 6, 9, 12, 25 and 26. A `*` marks AU4 when its peak is at or above the threshold, and a watched AU the analyzer never returned is listed as "not returned". The numbers are never trial data and are not written to the metrics log. The block is commented out at the freeze, not deleted.
 - **Startup checks.** On every start `main.js` checks the platform functions it calls (webcam, analyzer, `wait`, `AudioToText`, `createCheckInStrategy`, `agent.speak`, metrics, overlay), prints the helper and context names, and lists any missing ones in the console and on the preview line. A missing metrics logger falls back to the console and a missing overlay to adding the panel to the page. A missing camera, analyzer or `createCheckInStrategy` still stops the affected step, with a message naming it.
-- Status: confirmed running on sage.cs.fiu.edu with **Start trial** working as intended. The dry runs are finished and **Capture AU** is commented out.
+- Status: v0.4 is the frozen baseline and includes the trial report as its last real change. Before the trial report was added, the module was confirmed running on sage.cs.fiu.edu with **Start trial** working as intended; the trial report and the AU recorder are **untested on eEVA**, so run a practice trial and check them before counted trials. The dry runs are finished and **Capture AU** is commented out. No counted trials have been run yet.
+
+### Trial report
+
+After every **Start trial**, including one where no speech was heard, `showTrialReport()` replaces the one-line status with a multi-line report in the panel and logs the same data as one object in the console (`[trial_report]`). It is a display and annotation aid; the decision is still made by `evaluateCheckIn()`.
+
+| Field | Meaning |
+|---|---|
+| Transcript | What speech-to-text heard (`(none)` if nothing usable). A `Note:` line says why when it is empty (no recognizer events vs. no usable text). |
+| Capture window | Measured length in ms from the moment listening starts until it ends, with the 8000 ms limit. It is the window over which AU readings were collected. |
+| Window ended by | `silence after speech (1200 ms)` or `time limit reached (8000 ms)`. Silence can only end a window after speech was heard; an empty trial always ends by the time limit. |
+| Analyzer, samples | The analyzer in use (`openface3`) and the sample size: how many analyzer frames returned AU readings during the window. |
+| AU values | **Every AU the analyzer returns**, one per line, as `AUn: peak Peak, mean Avg` on the 0–100 scale (OpenFace 3.0: AU1, 2, 4, 6, 9, 12, 25, 26). The mean is over all samples in the window. `*` marks AU4 when its peak is at or above the threshold. |
+| AU4 threshold, AU4 peak used | The current `auThreshold` and the AU4 peak that `evaluateCheckIn` actually compared against it. This can differ slightly from the AU4 row above, because the report's rows come from the same collector as Capture AU, not from the decision path. |
+| Facial cue | `true`/`false`: AU4 peak ≥ threshold. |
+| Matched phrases | The `distressPhrases` found in the transcript, or `none`. |
+| Verbal cue | `true`/`false`: at least one phrase matched. |
+| Decision | `CHECK IN` or `DO NOT CHECK IN` (an addition to the requested fields, so each report is self-contained for annotation). |
+
+Implementation notes:
+- `createAuRecorder()` collects every AU per frame (peak and running total for the mean) for the trial report. It sits outside the commented-out Capture AU block, which keeps its own inline collection and is unchanged. The recorder's first-frame console log is tagged `[au_capture]` and is printed on every trial.
+- How the experimenter uses the report and which log columns it fills: `BASELINE_PROTOCOL.md`, section 6.
+- The end reason comes from `listenOnce()` (`listenEndReason`: `silence` or `time_limit`).
+- The decision path (`peak`, `evaluateCheckIn`, the metrics record) is unchanged; `trigger.js` was not touched, so the baseline logic is not affected.
 
 ### Open items before counted eEVA trials
 
 1. **Strategy names.** At startup the console reports which of the four `strategies` names `createCheckInStrategy` accepts. If any are rejected, rename them in `config.json` to the identifiers the platform uses.
 2. **Threshold.** The values the trial reads are on a 0–100 scale. The Capture AU dry runs are finished; record the `auThreshold` they support (currently 45) and the per-user neutral calibration decision at the freeze.
-3. **Task cards and instructions.** The word-for-word task cards (pose, line, timing relative to Start trial), the participant instructions and the "proper pose" criteria must exist before trial 1. See `BASELINE_PROTOCOL.md`.
-4. **Report the change from the proposal.** The baseline slide must say that AU7 was dropped as the second facial cue (OpenFace 3.0 does not support it, and PyFeat's AU7 readings were too noisy), so the facial cue is AU4 alone.
+3. **Printed materials.** The task cards, participant instructions, timing and "proper performance" criteria are written in `BASELINE_PROTOCOL.md` and `TEST_SCENARIOS.md`. Print the 20 cards, the key sheet and the paper validity sheet before trial 1.
+4. **Workbook.** Add the trial-report columns to the trial-log workbook (`BASELINE_PROTOCOL.md`, section 6). Record the commit hash of v0.4 at the freeze.
+5. **Report the change from the proposal.** The baseline slide must say that AU7 was dropped as the second facial cue (OpenFace 3.0 does not support it, and PyFeat's AU7 readings were too noisy), so the facial cue is AU4 alone.
