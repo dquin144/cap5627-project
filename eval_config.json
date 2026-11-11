@@ -1,0 +1,16 @@
+{
+  "defaultStrategy": "explicit_provides_space",
+  "defaultInputMode": "live",
+  "defaultVerbalMode": "llm",
+  "defaultGenerationMode": "llm",
+  "canonicalTranscript": "I'm really stressed about my exams.",
+  "simulatedAu4": 70,
+  "simulatedStimulusMs": 3000,
+  "typedCaptureMs": 5000,
+  "llmTimeoutMs": 8000,
+  "maxGenerationAttempts": 2,
+  "minResponseLatencyMs": 0,
+  "keepLiveTranscriptInLog": false,
+  "templates": {},
+  "approvedUtterances": {}
+}

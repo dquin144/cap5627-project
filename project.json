@@ -12,6 +12,7 @@
     "AudioToText",
     "project.createCheckInStrategy",
     "VoiceManager",
-    "project.createMetricLogger"
+    "project.createMetricLogger",
+    "helpers.llm.generate"
   ]
 }

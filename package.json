@@ -1,0 +1,12 @@
+{
+  "name": "cap5627-team32-empathic-checkin",
+  "version": "0.5.0",
+  "private": true,
+  "description": "CAP 5627 Team 3.2: AU4 + verbal-cue empathic check-in for eEVA. v0.5 evaluation build; v0.4 is the frozen baseline.",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\""
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

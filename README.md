@@ -2,6 +2,15 @@
 
 When a participant's face shows a brow-lowering movement (AU4) **and** they voice a concern, the agent checks in. The trigger is a transparent rule: `shouldTrigger = facialCue AND verbalCue`.
 
+> **Two builds live in this repository.**
+> - **v0.4: frozen baseline** (trigger accuracy, conditions A–D). Code at local tag `v0.4-baseline-frozen` / branch `baseline-v0.4-with-outputs`. Everything below this box describes v0.4 and is unchanged.
+> - **v0.5: evaluation build** (branch `feature/user-eval-llm-v0.5`), used to record the four VR-CoDES-P strategy vignettes. It adds:
+>   - an operator-selected strategy, worded by the platform LLM (`strategies.js`, `checkinPipeline.js`);
+>   - an optional LLM verbal-concern classifier with a keyword fallback (`verbalClassifier.js`);
+>   - LIVE / TYPED-TEXT / SIMULATED input modes, approved (frozen) lines, and a recording view.
+>
+>   `trigger.js` and `config.json` are unchanged and guarded by a test; v0.5 has its own `main.js` and `eval_config.json`. Read `USER_EVAL_IMPLEMENTATION.md` (deployment, policies, smoke test) and `VIGNETTE_RECORDING_PLAN.md` (recording procedure). Run tests with `npm test`. v0.5 output is **not** baseline data.
+
 ## Research rationale
 
 - **Why AU4.** A simple, observable candidate cue: AU4 is a brow-lowering movement that may accompany frowning, concern or concentration. It is **not** a reliable stand-alone indicator of sadness, stress or distress, and its meaning depends on context. Details: `AU_SELECTION_RATIONALE.md`.
