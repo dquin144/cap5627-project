@@ -7,7 +7,8 @@ When a participant's face shows a brow-lowering movement (AU4) **and** they voic
 > - **v0.5: evaluation build** (branch `feature/user-eval-llm-v0.5`), used to record the four VR-CoDES-P strategy vignettes. It adds:
 >   - an operator-selected strategy, worded by the platform LLM (`strategies.js`, `checkinPipeline.js`);
 >   - an optional LLM verbal-concern classifier with a keyword fallback (`verbalClassifier.js`);
->   - LIVE / TYPED-TEXT / SIMULATED input modes, approved (frozen) lines, and a recording view.
+>   - LIVE / TYPED-TEXT / SIMULATED input modes, approved (frozen) lines, and a recording view;
+>   - (v0.5.1) a short conversation around the check-in: a fixed opening question, the student's reply, and a brief closing (`conversation.js`).
 >
 >   `trigger.js` and `config.json` are unchanged and guarded by a test; v0.5 has its own `main.js` and `eval_config.json`. Read `USER_EVAL_IMPLEMENTATION.md` (deployment, policies, smoke test) and `VIGNETTE_RECORDING_PLAN.md` (recording procedure). Run tests with `npm test`. v0.5 output is **not** baseline data.
 

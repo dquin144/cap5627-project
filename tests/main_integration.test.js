@@ -7,7 +7,8 @@ const { installDom, uninstallDom, mockContext, scriptedLlm } = require("./helper
 
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ generate, speakMs } = {}) {
+// conversation: false runs the one-shot v0.5 flow (no opening question / reply / closing).
+async function boot({ generate, speakMs, conversation = false } = {}) {
   installDom();
   delete require.cache[require.resolve("../main.js")];
   const main = require("../main.js");
@@ -18,7 +19,10 @@ async function boot({ generate, speakMs } = {}) {
   const button = (text) => panel.findByText(text);
   const selects = panel.findAll("select");
   const [strategySel, inputSel, verbalSel, wordingSel] = selects;
-  return { main, ctx, running, panel, button, strategySel, inputSel, verbalSel, wordingSel };
+  const conversationLabel = panel.findAll("label").find((l) => l.children.some((c) => typeof c === "string" && c.includes("Conversation (")));
+  const conversationBox = conversationLabel.children[0];
+  conversationBox.checked = conversation;
+  return { main, ctx, running, panel, button, strategySel, inputSel, verbalSel, wordingSel, conversationBox };
 }
 
 async function setSelect(sel, value) {
@@ -158,6 +162,49 @@ test("without any LLM helper the module still runs and labels the fallback", asy
     const report = b.panel.findAll("pre")[0].textContent;
     assert.match(report, /Verbal detector: keywords_fallback/);
     assert.match(report, /Wording source: template_fallback/);
+  } finally {
+    await shutdown(b);
+  }
+});
+
+test("conversation mode (simulated): opener -> check-in -> closing, three agent turns, conversation metric", async () => {
+  const generate = async (prompt) => {
+    if (/label how a student replied/.test(prompt)) return '{"label":"elaborate"}';
+    if (/Reply with ONLY a JSON object/.test(prompt)) return '{"type":"concern"}';
+    if (/Briefly acknowledge what the student just shared/.test(prompt)) return "Thanks for telling me about your exams. I hope next week goes smoothly for you.";
+    return "It sounds like your exams are stressing you out. What worries you most about them?";
+  };
+  const b = await boot({ generate, conversation: true });
+  try {
+    await setSelect(b.inputSel, "simulated");
+    await b.button("Start scenario").dispatch("click");
+    assert.deepEqual(b.ctx.spoken, [
+      "How have things been going lately?",
+      "It sounds like your exams are stressing you out. What worries you most about them?",
+      "Thanks for telling me about your exams. I hope next week goes smoothly for you."
+    ]);
+    const convo = b.ctx.metricsLog.find((m) => m[0] === "conversation_v05");
+    assert.equal(convo[1], "check_in");
+    assert.match(convo[2], /reply_label=elaborate/);
+    assert.match(convo[2], /closing_source=llm/);
+    const report = b.panel.findAll("pre")[0].textContent;
+    assert.match(report, /CONVERSATION \(branch: check_in\)/);
+    assert.match(report, /Student \[reply\]: "Yeah, I have three exams next week/);
+  } finally {
+    await shutdown(b);
+  }
+});
+
+test("conversation mode: no trigger -> opener + neutral close only", async () => {
+  const b = await boot({ generate: null, conversation: true });
+  try {
+    await setSelect(b.inputSel, "simulated");
+    b.panel.findAll("input").find((i) => i.type === "text").value = "I'm doing pretty well today.";
+    await b.button("Start scenario").dispatch("click");
+    assert.equal(b.ctx.spoken.length, 2);
+    assert.equal(b.ctx.spoken[0], "How have things been going lately?");
+    assert.doesNotMatch(b.ctx.spoken[1], /\?/);
+    assert.equal(b.ctx.metricsLog.find((m) => m[0] === "conversation_v05")[1], "no_check_in");
   } finally {
     await shutdown(b);
   }

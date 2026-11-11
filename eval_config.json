@@ -11,6 +11,14 @@
   "maxGenerationAttempts": 2,
   "minResponseLatencyMs": 0,
   "keepLiveTranscriptInLog": false,
+  "conversation": {
+    "enabled": true,
+    "openingQuestion": "How have things been going lately?",
+    "defaultReply": "Yeah, I have three exams next week and I feel really behind.",
+    "replyMaxWaitMs": 12000,
+    "typedReplyMs": 4000,
+    "closingTemplates": {}
+  },
   "templates": {},
   "approvedUtterances": {}
 }

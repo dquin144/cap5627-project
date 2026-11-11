@@ -38,9 +38,9 @@ The four arms therefore differ only on the two study dimensions. **No arm gives 
 | # | ID | Sentence 1 (explicitness) | Sentence 2 (space) | Words |
 |---|---|---|---|---|
 | 1 | `explicit_provides_space` | "It sounds like your exams are stressing you out." | "Could you tell me more about what's been going on?" | 19 |
-| 2 | `explicit_reduces_space` | "It sounds like your exams are stressing you out." | "Let's go ahead and continue with the next part." | 18 |
+| 2 | `explicit_reduces_space` | "It sounds like your exams are stressing you out." | "Let's go ahead and move on for now." | 17 |
 | 3 | `nonexplicit_provides_space` | "Okay, I see what you mean." | "Could you tell me more about what's been going on?" | 16 |
-| 4 | `nonexplicit_reduces_space` | "Okay, I see what you mean." | "Let's go ahead and continue with the next part." | 15 |
+| 4 | `nonexplicit_reduces_space` | "Okay, I see what you mean." | "Let's go ahead and move on for now." | 14 |
 
 These are the template lines (the fallback, and a ready-made candidate set). LLM wording follows the same two-sentence structure; if you approve LLM lines instead, keep the shared parts identical across arms where you can.
 
@@ -48,6 +48,24 @@ Notes for the team review:
 - **The non-explicit opener** "Okay, I see what you mean." acknowledges that the student spoke but does not mention the exams or the stress. The manual codes "I see" as non-explicit. If the team feels any acknowledgement is too much for the non-explicit + reducing space arm, the alternative is a bare "Okay." Change `eval_config.json` `templates`, accept the shorter length, and record the choice here.
 - **The invitation** "what's been going on" is general wording. After an explicit opener the invitation clearly refers to the concern; after the neutral opener it does not name it, which is what keeps arm 3 non-explicit.
 - **Dismissive wording** ("don't worry", "not a big deal") is rejected in every arm. The manual treats it as active blocking, which devalues the feeling; using it would test rudeness, not space.
+
+## 2b. The conversation in each clip (v0.5.1)
+
+Each clip is now a short exchange. Only the check-in line differs between the four clips:
+
+| Turn | Who | Line | Same in all four clips? |
+|---|---|---|---|
+| 1 | Agent | "How have things been going lately?" | Yes |
+| 2 | Student | "I'm really stressed about my exams." (+ brow lowering) | Yes |
+| 3 | Agent | Check-in in the clip's strategy (section 2) | **No: this is the manipulation** |
+| 4 | Student | Reply (see below) | Team decision |
+| 5 | Agent | Closing for the reply's label | Yes, if turn 4 is the same |
+
+**Team decision: the student's reply in turn 4.** The default is "Yeah, I have three exams next week and I feel really behind." (an elaborating reply, closed with "Thank you for sharing that with me. I hope the rest of your week goes a little more smoothly."). There are two options:
+- **The same reply in all four clips** (recommended for control). Note that elaborating after a reducing-space line ("Let's go ahead and move on for now.") can look slightly unnatural.
+- **A natural reply per strategy**, for example elaborating after the providing-space lines and "Okay, sounds good." after the reducing-space lines (closing: "Sounds good. Thanks for chatting with me today."). This is more realistic, but turns 4–5 then differ between clips, which is a second difference viewers may react to.
+
+Record the choice in the log below. In SIMULATED and TYPED modes the reply comes from the "Student reply" box; with Wording = Approved or Template, every closing is a fixed line.
 
 ## 3. Choose how the stimulus is produced (decide as a team; disclose it)
 

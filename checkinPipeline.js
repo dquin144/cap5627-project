@@ -22,7 +22,7 @@ const {
   getTemplateUtterance
 } = require("./strategies.js");
 
-const VERSION = "v0.5";
+const VERSION = "v0.5.1";
 
 const VERBAL_MODES = ["llm", "keywords"];
 const GENERATION_MODES = ["llm", "approved", "template", "platform_helper"];

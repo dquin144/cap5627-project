@@ -17,9 +17,14 @@
  *    optional fixed response delay, captions, an exported session log, and an AU capture tool.
  * The trigger is unchanged: AU4 peak >= 45 (trigger.js) AND a verbal cue.
  *
+ * v0.5.1 adds an optional short conversation around the check-in (conversation.js): a fixed
+ * neutral opening question, the student's answer (the trigger turn), the check-in or a neutral
+ * close, the student's reply, and a brief closing. Code decides every turn; it is not a chatbot.
+ *
  * The project checker loads this file as CommonJS: run(context) and stop(context) are exposed
  * through module.exports. Upload main.js, trigger.js, config.json, eval_config.json,
- * strategies.js, llmAdapter.js, verbalClassifier.js and checkinPipeline.js together into src/.
+ * strategies.js, llmAdapter.js, verbalClassifier.js, checkinPipeline.js and conversation.js
+ * together into src/.
  */
 
 // Baseline settings: analyzer name, strategy list, values for the platform strategy helper.
@@ -37,6 +42,22 @@ const {
   toLogRecord,
   metricsDetail
 } = require("./checkinPipeline.js");
+const {
+  DEFAULT_OPENING_QUESTION,
+  runConversation,
+  toConversationLogRecord,
+  conversationMetricsDetail
+} = require("./conversation.js");
+
+// Conversation settings (eval_config.json "conversation"), with defaults.
+const convConfig = Object.assign({
+  enabled: true,
+  openingQuestion: DEFAULT_OPENING_QUESTION,
+  defaultReply: "",
+  replyMaxWaitMs: 12000,
+  typedReplyMs: 4000,
+  closingTemplates: {}
+}, evalConfig.conversation || {});
 
 // ---------------------------------------------------------------
 // Shared state. Declared at module level so stop() can release it.
@@ -265,9 +286,12 @@ module.exports.run = async function run(context) {
   const au4Input = el("input", { type: "number", min: 0, max: 100, step: 1, value: String(evalConfig.simulatedAu4 ?? 70), style: "width:90px; padding:4px; font:inherit;" });
   const delayInput = el("input", { type: "number", min: 0, max: 15000, step: 250, value: String(evalConfig.minResponseLatencyMs ?? 0), style: "width:90px; padding:4px; font:inherit;" });
   const captionsBox = el("input", { type: "checkbox" });
+  const conversationBox = el("input", { type: "checkbox", checked: convConfig.enabled !== false });
+  const replyInput = el("input", { type: "text", value: convConfig.defaultReply || "", style: "width:100%; padding:4px; font:inherit; box-sizing:border-box;" });
 
   const transcriptRow = field("Transcript (typed / fixed stimulus — used instead of speech-to-text)", transcriptInput);
   const au4Row = field("Synthetic AU4 value (0-100, SIMULATED, not a measurement)", au4Input);
+  const replyRow = field("Student reply to the check-in (typed / fixed; empty = no reply)", replyInput);
 
   const btnStyle = "margin:4px 6px 0 0; padding:6px 10px; font:inherit; cursor:pointer;";
   const startButton = el("button", { type: "button", text: "Start scenario", disabled: true, style: btnStyle + "font-weight:700;" });
@@ -299,8 +323,10 @@ module.exports.run = async function run(context) {
     field("Verbal cue detector", verbalSel),
     field("Check-in wording", wordingSel),
     transcriptRow,
+    replyRow,
     au4Row,
     el("div", { style: "display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin:4px 0;" },
+      el("label", { style: "font-size:12px;" }, conversationBox, " Conversation (opening question + reply + closing)"),
       el("label", { style: "font-size:12px;" }, "Min. response delay (ms) ", delayInput),
       el("label", { style: "font-size:12px;" }, captionsBox, " Captions")),
     el("div", {}, startButton, approveButton, recordingButton, exportButton),
@@ -354,6 +380,7 @@ module.exports.run = async function run(context) {
     modeBadge.style.background = styles[1];
     modeBadge.style.color = styles[2];
     transcriptRow.style.display = mode === "live" ? "none" : "block";
+    replyRow.style.display = mode !== "live" && conversationBox.checked ? "block" : "none";
     au4Row.style.display = mode === "simulated" ? "block" : "none";
   }
 
@@ -378,7 +405,7 @@ module.exports.run = async function run(context) {
   }
 
   function setControlsEnabled(enabled) {
-    [startButton, recRunButton, testLlmButton, captureAuButton, strategySel, inputSel, verbalSel, wordingSel]
+    [startButton, recRunButton, testLlmButton, captureAuButton, strategySel, inputSel, verbalSel, wordingSel, conversationBox]
       .forEach((c) => { c.disabled = !enabled; });
     approveButton.disabled = !enabled || !canApprove();
   }
@@ -558,7 +585,7 @@ module.exports.run = async function run(context) {
     return "";
   }
 
-  async function captureLine() {
+  async function captureLine(maxWaitMs = LISTEN_MAX_WAIT_MS) {
     speechEvents = 0;
     onInterim = (text) => { if (!stopped) setStatus("Hearing: \"" + text + "\""); };
     try {
@@ -572,13 +599,13 @@ module.exports.run = async function run(context) {
       );
     }
     if (stopped) return "";
-    const heard = await listenOnce();
+    const heard = await listenOnce(LISTEN_SILENCE_MS, maxWaitMs);
     if (heard || stopped) return heard;
     if (speechEvents === 0 && typeof context.speech?.listenOnce === "function") {
       console.warn("AudioToText produced no events; trying context.speech.listenOnce");
       setStatus("Retrying with the platform speech helper... say the line now.");
       try {
-        return transcriptFrom(await context.speech.listenOnce({ timeoutMs: 8000 }));
+        return transcriptFrom(await context.speech.listenOnce({ timeoutMs: maxWaitMs }));
       } catch (err) {
         console.error("context.speech.listenOnce failed:", err);
       }
@@ -652,10 +679,31 @@ module.exports.run = async function run(context) {
     };
   }
 
+  // Turn 2 (conversation mode): the student's reply to the check-in. Only the words are used;
+  // the face is not re-evaluated. LIVE uses speech-to-text with a longer limit; the other modes
+  // use the reply box after a fixed pause (so a live actor can say it aloud).
+  async function captureReply(inputMode) {
+    if (inputMode === "live") {
+      setStatus("Listening for the reply...");
+      const reply = await captureLine(Math.max(LISTEN_MAX_WAIT_MS, Number(convConfig.replyMaxWaitMs) || 12000));
+      onInterim = null;
+      if (reply) showCaption("Student: " + reply);
+      return { input: { transcript: reply, transcriptSource: "stt" } };
+    }
+    const reply = replyInput.value.trim();
+    const ms = inputMode === "simulated"
+      ? Math.max(0, Number(evalConfig.simulatedStimulusMs) || 0)
+      : Math.max(1000, Number(convConfig.typedReplyMs) || 4000);
+    setStatus((inputMode === "simulated" ? "SIMULATED" : "Typed") + " reply (" + (ms / 1000) + " s)...");
+    showCaption(reply ? "Student: " + reply : "");
+    await wait(ms);
+    return { input: { transcript: reply, transcriptSource: inputMode === "simulated" ? "fixture" : "typed" } };
+  }
+
   // ---------------------------------------------------------------
   // Scenario report (panel + console).
   // ---------------------------------------------------------------
-  function showScenarioReport(record, capture) {
+  function showScenarioReport(record, capture, convo) {
     const s = STRATEGIES[record.strategyId];
     const v = record.verbal || {};
     const g = record.generation || {};
@@ -709,8 +757,28 @@ module.exports.run = async function run(context) {
     }
     if (record.error) lines.push("ERROR: " + record.error);
     if (record.aborted) lines.push("Stopped before the scenario finished.");
+    if (convo) {
+      const rc = convo.replyClassification;
+      const c = convo.closing;
+      lines.push("", "CONVERSATION (branch: " + convo.branch + ")",
+        ...convo.turns.map((t) => (t.speaker === "agent" ? "  Agent" : "  Student") + " [" + t.kind + "]: " +
+          (t.text ? "\"" + t.text + "\"" : "(no reply)")));
+      if (rc) {
+        lines.push("Reply label: " + rc.label + " (source: " + rc.source + "; keyword rule: " + rc.keywordLabel + ")" +
+          (rc.fallbackReason ? " | fallback reason: " + rc.fallbackReason : ""));
+      }
+      if (c) {
+        lines.push("Closing: " + c.kind + " | source: " + c.source +
+          (c.responseLatencyMs != null ? " | delay " + c.responseLatencyMs + " ms" : "") +
+          (c.fallbackReason ? " | fallback reason: " + c.fallbackReason : ""));
+        if (c.validationIssues && c.validationIssues.length) lines.push("Rejected LLM closing issues: " + c.validationIssues.join("; "));
+      }
+      if (convo.safetyOverride) lines.push("SAFETY OVERRIDE: crisis wording detected; fixed support line used. Follow the study safety procedure.");
+      if (convo.error) lines.push("ERROR: " + convo.error);
+      if (convo.aborted) lines.push("Stopped before the conversation finished.");
+    }
     report.textContent = lines.join("\n");
-    console.log("[scenario_report_v05]", record, capture);
+    console.log("[scenario_report_v05]", record, capture, convo || null);
   }
 
   // ---------------------------------------------------------------
@@ -725,15 +793,19 @@ module.exports.run = async function run(context) {
     showCaption("");
     try {
       const inputMode = inputSel.value;
-      let captured;
-      if (inputMode === "simulated") {
-        captured = await captureSimulated();
-      } else {
-        if (!(await ensureSensors())) return;
-        captured = inputMode === "live" ? await captureLive() : await captureTypedText();
-      }
+      const conversational = conversationBox.checked;
+      if (inputMode !== "simulated" && !(await ensureSensors())) return;
       if (stopped) return;
-      if (inputMode === "live" && captured.input.transcript) showCaption("Student: " + captured.input.transcript);
+
+      // Turn 1: the student's answer (after the opening question in conversation mode).
+      let turn1 = null;
+      const captureTurn1 = async () => {
+        const captured = inputMode === "simulated" ? await captureSimulated()
+          : inputMode === "live" ? await captureLive() : await captureTypedText();
+        if (inputMode === "live" && captured.input.transcript) showCaption("Student: " + captured.input.transcript);
+        turn1 = captured;
+        return captured;
+      };
 
       const options = {
         strategyId: strategySel.value,
@@ -744,17 +816,23 @@ module.exports.run = async function run(context) {
         canonicalTranscript: evalConfig.canonicalTranscript,
         llmTimeoutMs: Number(evalConfig.llmTimeoutMs) || 8000,
         maxGenerationAttempts: Number(evalConfig.maxGenerationAttempts) || 2,
-        minResponseLatencyMs: Number(delayInput.value) || 0
+        minResponseLatencyMs: Number(delayInput.value) || 0,
+        openingQuestion: convConfig.openingQuestion,
+        closingTemplates: convConfig.closingTemplates || {}
       };
       const deps = {
         generate: llm ? llm.generate : null,
         wait,
         now: () => Date.now(),
         isStopped: () => stopped,
+        captureTurn: (turn) => (turn === 1 ? captureTurn1() : captureReply(inputMode)),
         onStage: (stage) => setStatus({
+          opening: "Agent is asking the opening question.",
           classifying: "Checking the sentence...",
           generating: "Preparing the check-in...",
-          speaking: "Agent is speaking."
+          speaking: "Agent is speaking.",
+          classifying_reply: "Checking the reply...",
+          closing: "Agent is closing the conversation."
         }[stage] || stage),
         platformStrategyUtterance: hasPlatformStrategy
           ? (id) => helpers.project.createCheckInStrategy(id).getUtterance({
@@ -773,22 +851,42 @@ module.exports.run = async function run(context) {
         }
       };
 
-      const record = await runScenario(captured.input, options, deps);
+      const keepLive = !!evalConfig.keepLiveTranscriptInLog;
+      let convo = null;
+      let record;
+      if (conversational) {
+        convo = await runConversation(options, deps);
+        record = convo.scenario;
+      } else {
+        await captureTurn1();
+        if (stopped) return;
+        record = await runScenario(turn1.input, options, deps);
+      }
+      if (!record || !turn1) {
+        // Stopped (or failed) before the student's answer was captured.
+        if (convo && convo.error) setStatus("Error: " + convo.error);
+        return;
+      }
       record.capture = {
-        windowMs: captured.capture.windowMs,
-        endReason: captured.capture.endReason,
-        samples: captured.capture.samples,
+        windowMs: turn1.capture.windowMs,
+        endReason: turn1.capture.endReason,
+        samples: turn1.capture.samples,
         analyzer: record.simulated ? "none (simulated)" : analyzerEngine
       };
       lastRecord = record;
-      sessionLog.push(toLogRecord(record, { keepLiveTranscript: !!evalConfig.keepLiveTranscriptInLog }));
+      sessionLog.push(convo
+        ? toConversationLogRecord(convo, { keepLiveTranscript: keepLive })
+        : toLogRecord(record, { keepLiveTranscript: keepLive }));
       metrics.record("trigger_decision_v05", record.shouldTrigger ? "check_in" : "no_check_in", metricsDetail(record));
       if (record.shouldTrigger) {
         metrics.record("check_in_v05", record.strategyId, "generation_source=" + (record.generation?.source || "none") + ";spoken=" + record.spoken);
       }
+      if (convo) metrics.record("conversation_v05", convo.branch || "none", conversationMetricsDetail(convo));
       if (stopped) return;
-      showScenarioReport(record, captured.capture);
-      setStatus(record.error ? "Finished with an error (see report)."
+      showScenarioReport(record, turn1.capture, convo);
+      const error = (convo && convo.error) || record.error;
+      setStatus(error ? "Finished with an error (see report)."
+        : convo ? "Done: conversation ended (" + convo.branch + ")."
         : record.shouldTrigger ? "Done: check-in " + (record.spoken ? "spoken." : "not spoken.")
         : "Done: no check-in (gate not met).");
     } catch (err) {
@@ -816,6 +914,7 @@ module.exports.run = async function run(context) {
       ? "SIMULATED mode: camera and microphone are off."
       : "Camera and microphone start on the next scenario.");
   });
+  conversationBox.addEventListener("change", renderModeBadge);
 
   approveButton.addEventListener("click", () => {
     if (!canApprove()) return;

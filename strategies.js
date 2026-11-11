@@ -61,7 +61,7 @@ const NONEXPLICIT_OPENER =
 const INVITE_CLOSER =
   "Sentence 2: invite the student to say more, as exactly one open question. End with that question.";
 const MOVE_ON_CLOSER =
-  "Sentence 2: move the conversation on to continuing the session. Do not ask any question and do not invite the student to say more.";
+  "Sentence 2: politely move the conversation on (for example 'Let's go ahead and move on for now.'). Do not ask any question and do not invite the student to say more.";
 const NONEXPLICIT_LIMIT =
   "Do NOT repeat or paraphrase the topic the student mentioned and do NOT name any feeling or emotion anywhere in the response.";
 
@@ -140,7 +140,7 @@ const TEMPLATE_PARTS = {
   explicitOpener: "It sounds like your exams are stressing you out.",
   nonexplicitOpener: "Okay, I see what you mean.",
   inviteCloser: "Could you tell me more about what's been going on?",
-  moveOnCloser: "Let's go ahead and continue with the next part."
+  moveOnCloser: "Let's go ahead and move on for now."
 };
 const DEFAULT_TEMPLATES = {
   explicit_provides_space: TEMPLATE_PARTS.explicitOpener + " " + TEMPLATE_PARTS.inviteCloser,
@@ -151,6 +151,9 @@ const DEFAULT_TEMPLATES = {
 
 // Advice, tips or reassurance: excluded from every arm (see the definitions above).
 const ADVICE_PATTERN = /\b(you should|try to|try (a|some|taking|making)|it helps|helps to|might help|tip|make a plan|study plan|will be (fine|ok|okay|alright)|work(s)? out|you('ll| will) (do|be) (great|fine))\b/i;
+// Mentions of the sensing (which would differ from a human conversation) and clinical wording.
+const FACE_PATTERN = /\b(face|facial|frown\w*|camera|detect\w*|sensor\w*|artificial intelligence|as an ai)\b/i;
+const CLINICAL_PATTERN = /\b(diagnos\w*|disorder|depression|therapy|therapist|medication|clinical)\b/i;
 
 // Lowercases, straightens apostrophes and collapses whitespace.
 function normalizeText(text) {
@@ -285,10 +288,10 @@ function validateUtterance(line, strategyId, transcript, limits = {}) {
   if (words > maxWords) issues.push("too long (" + words + " words, maximum " + maxWords + ")");
   if (countSentences(text) > 2) issues.push("more than 2 sentences");
   if (/[\u{1F300}-\u{1FAFF}]/u.test(text)) issues.push("contains emoji");
-  if (/\b(face|facial|frown\w*|camera|detect\w*|sensor\w*|artificial intelligence|as an ai)\b/i.test(text)) {
+  if (FACE_PATTERN.test(text)) {
     issues.push("mentions the face, camera, detection or AI");
   }
-  if (/\b(diagnos\w*|disorder|depression|therapy|therapist|medication|clinical)\b/i.test(text)) {
+  if (CLINICAL_PATTERN.test(text)) {
     issues.push("uses clinical or diagnostic language");
   }
 
@@ -333,6 +336,9 @@ module.exports = {
   SHARED_RULES,
   TEMPLATE_PARTS,
   DEFAULT_TEMPLATES,
+  ADVICE_PATTERN,
+  FACE_PATTERN,
+  CLINICAL_PATTERN,
   FEELING_WORDS,
   normalizeText,
   sanitizeTranscript,

@@ -12,6 +12,7 @@ v0.5 exists to record the four strategy vignettes for the user evaluation. It is
 | `config.json` (also guarded by a test) | `llmAdapter.js`: wrapper around the platform LLM helper (timeout, response-shape handling, no keys) |
 | `BASELINE_PROTOCOL.md`, `TRIAL_PROCEDURE.md`, `TEST_SCENARIOS.md`, `AU_SELECTION_RATIONALE.md` | `verbalClassifier.js`: LLM verbal-concern classifier with keyword fallback |
 | The AND gate: `shouldTrigger = facialCue && verbalCue` | `checkinPipeline.js`: one scenario from inputs to the spoken line, platform access injected |
+| | `conversation.js` (v0.5.1): the short conversation around the check-in (opening question, reply, closing) |
 | Webcam, AU peak tracking, `listenOnce`, AU recorder (copied unchanged into v0.5 `main.js`) | `main.js` (v0.5): operator panel, input modes, approvals, recording view, export, diagnostics |
 | | `eval_config.json`, `tests/`, `package.json`, this file, `VIGNETTE_RECORDING_PLAN.md` |
 
@@ -31,6 +32,35 @@ v0.5 exists to record the four strategy vignettes for the user evaluation. It is
 7. **Speak** with `context.agent.speak`, show the line on the panel (and in the caption if enabled), then log.
 
 The **strategy is always the operator's selection**. The LLM only words it; no code path lets the model choose or change the condition.
+
+## 2b. Conversation mode (v0.5.1, on by default)
+
+The check-in now sits inside a short conversation. The code decides every turn: the number of turns is fixed (at most 3 agent lines and 2 student turns), and the LLM only words a move the code has already chosen, or picks a label from a closed set. It is not a chatbot.
+
+```
+Agent:   fixed opening question (eval_config.json conversation.openingQuestion), identical every run
+Student: answer -> AU4 peak + verbal cue -> the unchanged AND gate
+  no trigger -> Agent: brief neutral reply that closes the chat; no feeling words, no question.   END
+  trigger    -> Agent: check-in in the selected strategy (unchanged)
+                Student: reply -> label: elaborate | acknowledge | decline | pause | unclear | (none)
+                Agent: closing for that label.                                                   END
+Crisis wording in either student turn -> the fixed safety line.                                  END
+```
+
+- **Opening question** is spoken and awaited before listening starts, so the microphone never hears the agent. The AU4 window covers the student's answer only.
+- **Reply (turn 2)**: only the words are used; the face is not re-evaluated.
+  - LIVE: speech-to-text, up to `replyMaxWaitMs` (12 s).
+  - TYPED: the reply box, after `typedReplyMs` (4 s).
+  - SIMULATED: the reply box, after `simulatedStimulusMs`.
+  - An empty reply box means "no reply".
+- **Reply label**: LLM over a closed set, one call, with keyword rules as the fallback (`keywords_fallback` plus a reason). With the detector set to "Keywords only", the keyword rules are used directly. `unclear` is closed like `acknowledge`.
+- **Closings** do not depend on the strategy, so the experimental manipulation stays in the check-in.
+  - The `decline`, `pause`, `acknowledge`, `no_reply` and `no_speech` closings are always fixed lines (`conversation.js` `CLOSING_TEMPLATES`, overridable in `eval_config.json` `conversation.closingTemplates`).
+  - The `elaborate` closing and the no-trigger `neutral_close` are worded by the LLM in "LLM" wording mode and validated: no question, no advice, no clinical words; the neutral close may use no feeling words, and the elaborate closing may only echo feeling words the student used. A failed line gets one retry, then falls back to the template.
+  - In the Approved and Template wording modes, all closings are templates, so recordings are reproducible.
+- **Response delay**: the same minimum delay applies to the check-in and to the closing.
+- **Logging**: the `conversation_v05` metric records branch, reply label and source, and closing kind and source, with no transcripts. The exported log omits live speech-to-text turns, as before.
+- **One-shot mode**: untick "Conversation" to get the earlier one-shot behaviour (answer → check-in only).
 
 ## 3. Deterministic policies
 
@@ -87,8 +117,8 @@ The **strategy is always the operator's selection**. The LLM only words it; no c
 Create a **new** eEVA project for v0.5. Do not overwrite the v0.4 project you used for counted trials.
 
 1. `git checkout feature/user-eval-llm-v0.5`, then `npm test` (Node 20+, no install step, no dependencies).
-2. In Project Studio create the project. Upload into `src/` these **eight** files, all side by side (the `require("./...")` paths assume one folder):
-   `main.js`, `trigger.js`, `config.json`, `eval_config.json`, `strategies.js`, `llmAdapter.js`, `verbalClassifier.js`, `checkinPipeline.js`.
+2. In Project Studio create the project. Upload into `src/` these **nine** files, all side by side (the `require("./...")` paths assume one folder):
+   `main.js`, `trigger.js`, `config.json`, `eval_config.json`, `strategies.js`, `llmAdapter.js`, `verbalClassifier.js`, `checkinPipeline.js`, `conversation.js`.
    Do **not** upload `tests/`, `package.json` or the `.md` files.
 3. Use `project.json` as the project manifest. If the checker rejects `helpers.llm.generate`, remove that line: the module still runs and shows `LLM helper: not found` with labelled fallbacks. Then ask the instructor or TA how to enable the LLM helper for Project Studio projects. The same applies to any other helper-group name it rejects.
 4. Run the project in Chrome or Edge and allow the camera and microphone.
@@ -102,7 +132,7 @@ None of these have been verified on eEVA yet. They are mocked in `tests/`.
 
 | # | Check | Pass when | Where to look |
 |---|---|---|---|
-| 1 | Project loads (CommonJS checker accepts the 8 files) | The panel appears, titled "Empathic Check-In v0.5" | Screen |
+| 1 | Project loads (CommonJS checker accepts the 9 files) | The panel appears, titled "Empathic Check-In v0.5.1" | Screen |
 | 2 | Platform pieces | Diagnostics shows "All required platform pieces found" | Panel > Diagnostics; console |
 | 3 | LLM helper exists | Diagnostics shows `LLM helper: context.llm.generate` (or `context.helpers.llm.generate`) | Diagnostics; console line `LLM helper:` |
 | 4 | LLM responds | **Test LLM** shows "OK in N ms". Note N: if it exceeds about 3000, use a 3000–4000 ms response delay when recording. | Diagnostics |
@@ -117,6 +147,7 @@ None of these have been verified on eEVA yet. They are mocked in `tests/`.
 | 13 | Recording view | Only "Run" / "Exit recording view" visible; the panel hides during the run; runner controls hidden | Screen |
 | 14 | Stop | Press Stop mid-speech: speech stops, camera light off, no further speech; restart works | Screen |
 | 15 | Metrics | `trigger_decision_v05` entries with `version=v0.5` appear in the platform metrics view | Metrics panel |
+| 15b | Conversation | With "Conversation" ticked (default), LIVE: the agent asks the opening question, waits until it finishes, then listens; after the check-in it listens again and closes. Try replies "I'd rather not talk about it" (decline line), "Can we take a break?" (pause line), a longer reply (LLM closing). A relaxed face gives a neutral close with no feeling words. | Report "CONVERSATION" section; audio |
 | 16 | Fallback visible | (Optional) Remove `helpers.llm.generate` or test offline: report shows `keywords_fallback` / `template_fallback` with reasons | Report |
 
 Record the results, the eEVA project name, the date and the commit hash for the dry-run note due Thu Nov 12.
@@ -127,7 +158,7 @@ Record the results, the eEVA project name, the date and the commit hash for the 
 npm test            # or: node --test "tests/*.test.js"
 ```
 
-There are 51 tests across six files, all with no network access:
+There are 68 tests across seven files, all with no network access:
 - the frozen-rule regression, including the 20 task-card lines, the 44.9/45/45.1 boundary, malformed AUs, and byte-identity of `trigger.js`/`config.json` with the tag;
 - the strategy prompts and validator;
 - the LLM adapter: timeouts, response shapes, errors;

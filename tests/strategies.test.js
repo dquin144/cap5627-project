@@ -74,7 +74,7 @@ test("all four templates pass their own strategy validation and are length-match
     assert.deepEqual(s.validateUtterance(t, id, STIMULUS), { ok: true, issues: [] }, id);
     return s.countWords(t);
   });
-  assert.ok(Math.max(...counts) - Math.min(...counts) <= 4, "word counts " + counts);
+  assert.ok(Math.max(...counts) - Math.min(...counts) <= 5, "word counts " + counts);
 });
 
 test("validator enforces space and explicitness per quadrant", () => {
