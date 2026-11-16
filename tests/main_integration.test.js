@@ -7,6 +7,15 @@ const { installDom, uninstallDom, mockContext, scriptedLlm } = require("./helper
 
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 
+// The scenario report is written to the browser console (not the eEVA panel), so capture it.
+const consoleReports = [];
+const realConsoleLog = console.log;
+console.log = (...args) => {
+  if (typeof args[0] === "string" && args[0].startsWith("[scenario_report_v05]\n")) consoleReports.push(args[0]);
+  realConsoleLog(...args);
+};
+const lastReport = () => consoleReports[consoleReports.length - 1] || "";
+
 // conversation: false runs the one-shot v0.5 flow (no opening question / reply / closing).
 async function boot({ generate, speakMs, conversation = false } = {}) {
   installDom();
@@ -51,7 +60,8 @@ test("simulated scenario: triggers, speaks one strategy line, logs v0.5 metrics 
     assert.equal(decision[1], "check_in");
     assert.match(decision[2], /simulated=true/);
     assert.match(decision[2], /generation_source=llm/);
-    const report = b.panel.findAll("pre")[0].textContent;
+    const report = lastReport();
+    assert.equal(b.panel.findAll("pre").length, 0, "no log box on the panel");
     assert.match(report, /SIMULATED DEMO/);
     assert.match(report, /\[SIMULATED\]/);
     assert.match(report, /Decision: CHECK IN/);
@@ -159,7 +169,8 @@ test("without any LLM helper the module still runs and labels the fallback", asy
     await setSelect(b.inputSel, "simulated");
     await b.button("Start scenario").dispatch("click");
     assert.equal(b.ctx.spoken.length, 1);
-    const report = b.panel.findAll("pre")[0].textContent;
+    const report = lastReport();
+    assert.equal(b.panel.findAll("pre").length, 0, "no log box on the panel");
     assert.match(report, /Verbal detector: keywords_fallback/);
     assert.match(report, /Wording source: template_fallback/);
   } finally {
@@ -187,7 +198,8 @@ test("conversation mode (simulated): opener -> check-in -> closing, three agent 
     assert.equal(convo[1], "check_in");
     assert.match(convo[2], /reply_label=elaborate/);
     assert.match(convo[2], /closing_source=llm/);
-    const report = b.panel.findAll("pre")[0].textContent;
+    const report = lastReport();
+    assert.equal(b.panel.findAll("pre").length, 0, "no log box on the panel");
     assert.match(report, /CONVERSATION \(branch: check_in\)/);
     assert.match(report, /Student \[reply\]: "Yeah, I have three exams next week/);
   } finally {

@@ -304,7 +304,6 @@ module.exports.run = async function run(context) {
 
   const statusLine = el("p", { text: "Starting...", style: "margin:8px 0; white-space:pre-line;" });
   const utteranceLine = el("p", { text: "", style: "margin:8px 0; padding:8px; background:#eef6f0; border-radius:6px; font-size:14px; display:none;" });
-  const report = el("pre", { style: "margin:8px 0; padding:8px; background:#f6f7f6; border-radius:6px; white-space:pre-wrap; font:12px/1.35 ui-monospace, monospace; max-height:260px; overflow:auto;" });
   const diagnostics = el("p", { style: "margin:6px 0; font-size:12px; color:#4a5f52; white-space:pre-line;" });
   const approvalsList = el("div", { style: "font-size:12px; white-space:pre-line;" });
   const exportArea = el("textarea", { readOnly: true, style: "display:none; width:100%; height:140px; font:11px ui-monospace, monospace; box-sizing:border-box;" });
@@ -332,7 +331,6 @@ module.exports.run = async function run(context) {
     el("div", {}, startButton, approveButton, recordingButton, exportButton),
     statusLine,
     utteranceLine,
-    report,
     approvalsBox,
     diagnosticsBox,
     exportArea,
@@ -701,7 +699,7 @@ module.exports.run = async function run(context) {
   }
 
   // ---------------------------------------------------------------
-  // Scenario report (panel + console).
+  // Scenario report (browser console only; not shown on the eEVA panel).
   // ---------------------------------------------------------------
   function showScenarioReport(record, capture, convo) {
     const s = STRATEGIES[record.strategyId];
@@ -777,8 +775,8 @@ module.exports.run = async function run(context) {
       if (convo.error) lines.push("ERROR: " + convo.error);
       if (convo.aborted) lines.push("Stopped before the conversation finished.");
     }
-    report.textContent = lines.join("\n");
-    console.log("[scenario_report_v05]", record, capture, convo || null);
+    console.log("[scenario_report_v05]\n" + lines.join("\n"));
+    console.log("[scenario_report_v05] raw", record, capture, convo || null);
   }
 
   // ---------------------------------------------------------------
@@ -885,7 +883,7 @@ module.exports.run = async function run(context) {
       if (stopped) return;
       showScenarioReport(record, turn1.capture, convo);
       const error = (convo && convo.error) || record.error;
-      setStatus(error ? "Finished with an error (see report)."
+      setStatus(error ? "Finished with an error (see browser console)."
         : convo ? "Done: conversation ended (" + convo.branch + ")."
         : record.shouldTrigger ? "Done: check-in " + (record.spoken ? "spoken." : "not spoken.")
         : "Done: no check-in (gate not met).");
@@ -1015,13 +1013,13 @@ module.exports.run = async function run(context) {
       onAuFrame = null;
       if (stopped) return;
       const sum = rec.summary();
-      report.textContent = ["CAPTURE AU (diagnostic, not a trial)",
+      console.log("[capture_au_v05]\n" + ["CAPTURE AU (diagnostic, not a trial)",
         "Analyzer: " + analyzerEngine + " | samples: " + sum.samples + " | AU4 threshold: " + CONFIG.auThreshold,
         ...(sum.rows.length
           ? sum.rows.map((r) => "  " + r.label + ": " + r.peak + " Peak, " + r.avg + " Avg" + (r.atOrAboveThreshold ? " *" : ""))
-          : ["  (no AU readings received)"])].join("\n");
-      console.log("[capture_au_v05]", sum);
-      setStatus("Capture AU finished.");
+          : ["  (no AU readings received)"])].join("\n"));
+      console.log("[capture_au_v05] raw", sum);
+      setStatus("Capture AU finished (results in browser console).");
     } catch (err) {
       console.error("Capture AU failed:", err);
       setStatus("Capture AU error: " + (err && err.message ? err.message : err));
